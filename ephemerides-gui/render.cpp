@@ -15,6 +15,19 @@ int displaceIndex(int key) {
 	return key - c;
 }
 
+void printTask() {
+    if(!gNewData) return;
+
+    rt_printf("=== DeviceState ===\n");
+
+    rt_printf("Pots:\n");
+    rt_printf("%i \n", gBufferState.potIndex);
+    rt_printf("%f \n", gBufferState.potValue);
+
+
+    gNewData = false;
+}
+
 float calculateRatio(algorithms algo, int index) {
 	float ratio = 1;
 	
@@ -70,6 +83,15 @@ bool setup(BelaContext *context, void *userData)
 	scope.setup(NUM_OSCS, context->audioSampleRate);
 	
 	gui.setup(context->projectName);
+	
+	//gui set buffers
+	gui.setBuffer('f', 2);  
+	gui.setBuffer('f', 1);
+	gui.setBuffer('f', 1);
+	gui.setBuffer('f', 2);
+	gui.setBuffer('f', 1);
+	gui.setBuffer('f', 1);
+	
 
 	//setup filter settings
 	s.fs = context->audioSampleRate;
@@ -122,6 +144,52 @@ void render(BelaContext *context, void *userData)
 	
      //We create an auxiliary counter variable that will indicate when to send the buffer
 	static unsigned int count = 0;
+	
+	//receiving buffer data 
+	DataBuffer& potsBuf = gui.getDataBuffer(0);
+	DataBuffer& presetBuf = gui.getDataBuffer(1);
+	DataBuffer& touchBuf = gui.getDataBuffer(2);
+	DataBuffer& registerBuf = gui.getDataBuffer(3);
+	DataBuffer& freqBuf = gui.getDataBuffer(4);
+	DataBuffer& bigBuf = gui.getDataBuffer(5);
+	
+	// Retrieve contents of the buffer as floats
+		//store in struct 
+	unsigned int blength = potsBuf.getNumElements();
+	if(blength>0){
+		float* potsData = potsBuf.getAsFloat();
+		gBufferState.potIndex = (int) potsData[0];
+		gBufferState.potValue = potsData[1];
+		
+		gBufferState.activePreset = (int) presetBuf.getAsFloat();
+		
+		float* touchData = touchBuf.getAsFloat();
+		gBufferState.touchIndex = (int) touchData[0];
+		gBufferState.touchValue = touchData[1];
+		
+		float* registerData = registerBuf.getAsFloat();
+		gBufferState.registerIndex = (int) registerData[0];
+		gBufferState.registerValue = registerData[1];
+		
+		float* freqData = freqBuf.getAsFloat();
+		uint32_t mask;
+    	memcpy(&mask, &freqData[0], sizeof(uint32_t));
+    	bool micButton = (mask >> 0) & 1;
+    	bool keyboardButton = (mask >> 1) & 1;
+    	bool lastSelectedButton = (mask >> 2) & 1;
+    	
+    	float* bigData = bigBuf.getAsFloat();
+		uint32_t mask2;
+    	memcpy(&mask2, &bigData[0], sizeof(uint32_t));
+    	bool savePresetButton = (mask2 >> 0) & 1;
+    	bool setReferenceButton = (mask2 >> 1) & 1;
+    	bool toggleOutputButton = (mask2 >> 2) & 1;
+		
+		gNewData = true;
+	//	if(gBufferState.potIndex>0) printTask();
+	}
+
+	
 	
 	for(unsigned int n = 0; n < context->audioFrames; n++) {
 		
@@ -268,3 +336,6 @@ void render(BelaContext *context, void *userData)
 void cleanup(BelaContext *context, void *userData)
 {
 }
+
+
+

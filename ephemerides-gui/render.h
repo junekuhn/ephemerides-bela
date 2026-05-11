@@ -107,6 +107,40 @@ const std::map<std::string, int> configs {
 	{"HOLD", 24}
 };
 
+struct BufferState {
+
+    // From Gui
+    int   potIndex;         // Buffer 0
+    float potValue;
+    int   activePreset;     // Buffer 1 
+    float touchValue;   	// Buffer 2 
+    int   touchIndex;
+    int   registerIndex;	// Buffer 3
+    float registerValue;
+    float bigButtons;		// Buffer 4 
+    float freqButtons;		// Buffer 5
+    
+
+    // to Gui... h for hardware
+    int   hPotIndex;        // Buffer 6
+    float hPotValue;
+    int   hActivePreset;    // Buffer 7 
+    int   hTouchIndex;      // Buffer 8
+    float hTouchValue;
+    float hAvailability;	
+    float hSevenSegment;	// Buffer 9 
+    int   hRegisterIndex;	// Buffer 10 
+    float hRegisterValue;
+    float hBigButtons;		// Buffer 11
+    float hFreqButtons;		// Buffer 12
+    
+    // filter Channel volumes
+    float volumes[32];		//Buffer 13
+	
+};
+
+BufferState gBufferState;
+
 // int keys[NUM_KEYS] = {8,9,10,11,12,13,14,15,16,17,18,19,20,21};
 //with two broken keys
 int keys[NUM_KEYS] = {8,9,11,12,13,14,15,16,17,18,19,21};
@@ -179,6 +213,8 @@ std::vector<Biquad> filterBank(NUM_OSCS);
 Biquad::Settings s;
 
 float gTimePeriod = 0.1;
+
+bool gNewData = false;
 
 
 

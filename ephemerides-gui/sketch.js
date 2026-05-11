@@ -179,6 +179,7 @@ class arcTouch {
     //what states each register is in
     this.registerStates = [1, 0, 12, 0, 1];
     this.registerOn = false;
+    this.registerIndex = 0;
   }
   
   init() {
@@ -357,19 +358,17 @@ function updateArc(e) {
 	//check if register key is down
 	if(outerArc.registerOn) {
 		
-		//save the new value to registerStates
-		let registerIndex = outerArc.registerOn-1;
-		outerArc.registerStates[registerIndex] = e.target.value;
+		outerArc.registerStates[outerArc.registerIndex] = e.target.value;
 		
 		//turn off register 
-	  	registerButtons.state.values[registerIndex] = false;
-		registerButtons.state.elements[registerIndex].elt.checked = false;
-		registerButtons.state.colors[registerIndex] = color(0,0,0);
+	  	registerButtons.state.values[outerArc.registerIndex] = false;
+		registerButtons.state.elements[outerArc.registerIndex].elt.checked = false;
+		registerButtons.state.colors[outerArc.registerIndex] = color(0,0,0);
 
 		
 		
 		//resolve arc back to its original state (touched)
-		for(let t = 0; t<outerArc.numPoints; t++){
+		for(let t = 0; t<outerArc.numPoints*2; t++){
 			if(outerArc.state.touched[t]) {
 				outerArc.state.colors[t] = color(0,0,0);
 				outerArc.state.elements[t].elt.checked = true;
@@ -379,7 +378,8 @@ function updateArc(e) {
 			}
 		}
 		
-		
+		//send register to bela
+		Bela.data.sendBuffer(3, "float", [outerArc.registerIndex, e.target.value]);
 		
 		outerArc.registerOn = false;
 		
@@ -438,14 +438,18 @@ function updateRegister(e) {
   registerButtons.state.colors[index] = color(e.target.checked ? 255:0, 0, 0);
   registerButtons.state.values[index] = e.target.checked;
   
-	outerArc.registerOn = index+1;
+  console.log(index)
+	outerArc.registerOn = true;
+	outerArc.registerIndex = index;
   
   //update arc with current register data
-  for(let f = 0; f<outerArc.numPoints; f++) {
+  for(let f = 0; f<outerArc.numPoints*2; f++) {
   	if (f == outerArc.registerStates[index]) {
   		outerArc.state.colors[f] = color(0,0,0);
+  		outerArc.state.elements[f].elt.checked = true;
   	} else {
   		outerArc.state.colors[f] = color(255, 0, 0);
+  		outerArc.state.elements[f].elt.checked = false;
   	}
   }
   
@@ -470,7 +474,7 @@ function updatePot(e) {
 	let potvalue = e.target.value;
 	let potindex = e.target.getAttribute("data-index");
 
-	Bela.sendBuffer(0, "float", [potindex, potvalue]);
+	Bela.data.sendBuffer(0, "float", [potindex, potvalue]);
 }
 
 // Set or clear a bit by index and boolean value
