@@ -1,0 +1,41 @@
+{
+  "version": 2,
+  "parameters": {
+    "sampleRate": 44100,
+    "bitDepth": 16,
+    "blockSize": 16,
+    "analogChannels": 8,
+    "analogSampleRate": 22050,
+    "useAnalog": true,
+    "useDigital": true,
+    "muteSpeaker": false,
+    "disableLED": false,
+    "headphoneGains": [
+      -6,
+      -6,
+      -6,
+      -6,
+      -6,
+      -6,
+      -6,
+      -6
+    ],
+    "inputGains": [
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10
+    ],
+    "userArguments": "",
+    "makeParameters": "",
+    "multiplexer": 0,
+    "audioExpander": false,
+    "y": [],
+    "z": []
+  },
+  "fileName": "sketch.js"
+}
