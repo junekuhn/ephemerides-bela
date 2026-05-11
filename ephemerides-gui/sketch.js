@@ -2,9 +2,23 @@
 For sending a buffer from p5.js to Bela we use the function:
 ```
 Bela.data.sendBuffer(0, 'float', buffer);
+
+
+buffer structure
+| gui           | to                 | bela |                                  |
+| ------------- | ------------------ | ---- | -------------------------------- |
+| 0             | pot values         | 2    | index and value floats           |
+| 1             | preset index       | 1    | float                            |
+| 2             | 32 touch values    | 2    | float and index                            |
+| 3             | register keys      | 2    | index and value floats           |
+| 4             | big buttons.       | 1    | float(bitmask)                   |
+| 5             | freq buttons       | 1    | float(bitmask)                   |
 ```
 where the first argument (0) is the index of the sent buffer, second argument ('float') is the type of the
 data, and third argument (buffer) is the data array to be sent.
+
+error handling is mostly on bela side 
+
 */
 
 let outerArc;
@@ -156,11 +170,15 @@ class arcTouch {
     this.numPoints = numPoints;
     this.state = {
       colors: [],
+      // this contains both index and value
       touched: new Array(32).fill(false),
       elements: []
     }
     this.maxTouchPoints = 4;
     this.init();
+    //what states each register is in
+    this.registerStates = [1, 0, 12, 0, 1];
+    this.registerOn = false;
   }
   
   init() {
@@ -220,9 +238,10 @@ class buttonArray {
     this.spacing = spacing;
     this.length = length;
     this.state = {
-      value: [],
-      colors: [],
+      values: new Array(numButtons).fill(0),
+      colors: new Array(numButtons).fill(color(0,0,0)),
       elements: [],
+      mask: 0,
     }
     this.type  = type;
     this.coords = coords;
@@ -236,8 +255,10 @@ class buttonArray {
         if(this.type == "POT") {
           //create sliders
           this.state.elements.push(createSlider(0, 255, 0, 10));
+          this.state.elements[button].elt.setAttribute("data-index", `${button}`);
           this.state.elements[button].position(width*.5, 40 + button*20);
           this.state.elements[button].size(100);
+          this.state.elements[button].elt.addEventListener("change", updatePot);
 
       } else if (this.type == "BIG") {
           this.state.elements.push(createInput(`${button}`, "checkbox"));
@@ -262,6 +283,7 @@ class buttonArray {
           this.state.elements.push(createSlider(1, 12, 0, 1));
           this.state.elements[0].position(width*.8, 320);
           this.state.elements[0].size(100);
+          this.state.elements[0].elt.addEventListener("change", updatePreset);
       }
     
 
@@ -331,26 +353,130 @@ class Meter {
 }
 
 function updateArc(e) {
+	
+	//check if register key is down
+	if(outerArc.registerOn) {
+		
+		//save the new value to registerStates
+		let registerIndex = outerArc.registerOn-1;
+		outerArc.registerStates[registerIndex] = e.target.value;
+		
+		//turn off register 
+	  	registerButtons.state.values[registerIndex] = false;
+		registerButtons.state.elements[registerIndex].elt.checked = false;
+		registerButtons.state.colors[registerIndex] = color(0,0,0);
+
+		
+		
+		//resolve arc back to its original state (touched)
+		for(let t = 0; t<outerArc.numPoints; t++){
+			if(outerArc.state.touched[t]) {
+				outerArc.state.colors[t] = color(0,0,0);
+				outerArc.state.elements[t].elt.checked = true;
+			} else {
+				outerArc.state.colors[t] = color(255, 0, 0);
+				outerArc.state.elements[t].elt.checked = false;
+			}
+		}
+		
+		
+		
+		outerArc.registerOn = false;
+		
+		return;
+		
+	}
+    
+  
+    
+
+    
+    //send register buffer 
+    
+    
       //go through all points and colors and indicators based on state changes
     let index = e.target.value;
+    
+    
+
     outerArc.state.colors[index] = color(e.target.checked ? 0:255, 0, 0)
     outerArc.state.touched[index] = e.target.checked;
     
+    let touchBufferArray = [index, outerArc.state.touched[index]];
+    
     //send to bela 
-    Bela.data.sendBuffer(index, 'bool', outerArc.state.touched);
+    Bela.data.sendBuffer(2, 'float', touchBufferArray);
 }
 
 function updateBig(e) {
   let index = e.target.value;
   bigButtons.state.colors[index] = color(e.target.checked ? 255:0, 0, 0);
+  
+  bigButtons.state.mask = updateBitmask(bigButtons.state.mask, index, e.target.checked);
+  
+  Bela.data.sendBuffer(4, "float", bigButtons.state.mask)
 }
 
 function updateRegister(e) {
+
+//last pressed 
+  registerButtons.state.values.map((value, i) => {
+  	if(value == true) {
+  		registerButtons.state.values[i] = false;
+  		registerButtons.state.elements[i].elt.checked = false;
+  		registerButtons.state.colors[i] = color(0,0,0);
+  	}
+  });
+  
+  
+  //these are shift keys, so only one at a time (last pressed), and toucharc needs to check 
   let index = e.target.value;
+
+  
+
+  
   registerButtons.state.colors[index] = color(e.target.checked ? 255:0, 0, 0);
+  registerButtons.state.values[index] = e.target.checked;
+  
+	outerArc.registerOn = index+1;
+  
+  //update arc with current register data
+  for(let f = 0; f<outerArc.numPoints; f++) {
+  	if (f == outerArc.registerStates[index]) {
+  		outerArc.state.colors[f] = color(0,0,0);
+  	} else {
+  		outerArc.state.colors[f] = color(255, 0, 0);
+  	}
+  }
+  
 }
 
 function updateFreq(e) {
   let index = e.target.value;
   freqButtons.state.colors[index] = color(e.target.checked ? 255:0, 0, 0);
+  
+  freqButtons.state.mask = updateBitmask(freqButtons.state.mask, index, e.target.checked);
+  
+  Bela.data.sendBuffer(5, "float", freqButtons.state.mask)
+}
+
+function updatePreset(e) {
+	//value from 1 to 12
+	Bela.data.sendBuffer(1, "float", e.target.value)
+}
+
+function updatePot(e) {
+	// value from 0 255
+	let potvalue = e.target.value;
+	let potindex = e.target.getAttribute("data-index");
+
+	Bela.sendBuffer(0, "float", [potindex, potvalue]);
+}
+
+// Set or clear a bit by index and boolean value
+function updateBitmask(mask, index, value) {
+    if(value)
+        return (mask | (1 << index)) >>> 0;   
+    else
+        return (mask & ~(1 << index)) >>> 0;  
 }
