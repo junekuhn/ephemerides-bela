@@ -116,7 +116,7 @@ struct BufferState {
     float touchValue;   	// Buffer 2 
     int   touchIndex;
     int   registerIndex;	// Buffer 3
-    float registerValue;
+    int   registerValue;
     float bigButtons;		// Buffer 4 
     float freqButtons;		// Buffer 5
     
@@ -130,7 +130,7 @@ struct BufferState {
     float hAvailability;	
     float hSevenSegment;	// Buffer 9 
     int   hRegisterIndex;	// Buffer 10 
-    float hRegisterValue;
+    int   hRegisterValue;
     float hBigButtons;		// Buffer 11
     float hFreqButtons;		// Buffer 12
     
@@ -139,7 +139,50 @@ struct BufferState {
 	
 };
 
+// i think that this struct would serve as preset data 
+struct DeviceState {
+	
+	//buttons
+	bool micButton;
+	bool keyboardButton;
+	bool lastSelectedButton;
+	bool savePresetButton;
+	bool setReferenceButton;
+	bool toggleOutputButton;
+	bool droneModeButton;
+	
+	//potentiometers
+	float hiFreqBoost;
+	float filterQ;
+	float filterGain;
+	float lpCutoff;
+	float micGain;
+	float filterChannelGain;
+	float limiterThresh;
+	float limiterLookahead;
+	float limiterRelease;
+	float baseFrequency = 220;
+	float fbAmount;
+	float glideAmount = 10;
+	
+	//touch data 
+	
+	//preset data 
+	int activePreset;
+	
+	//freq display
+	float freqDisplay;
+	
+	//config data
+	float numerator = 2;
+	float denominator = 1;
+	float divisor = 4;
+	algorithms selectedAlgorithm = ARITHMETIC_DIVISION;
+	
+};
+
 BufferState gBufferState;
+DeviceState gDeviceState;
 
 // int keys[NUM_KEYS] = {8,9,10,11,12,13,14,15,16,17,18,19,20,21};
 //with two broken keys
@@ -163,14 +206,10 @@ float jFreq = 1.0;
 
 //DEFAULT CONFIG VALUES
 float ratios[NUM_OSCS] = {1,1,1,1,1, 1, 1, 1};
-float topValue = 2;
-float bottomValue = 1;
-float glideAmount = 10;
-float divisor = 4;
-algorithms selectedAlgorithm = ARITHMETIC_DIVISION;
-float baseFrequency = 220;
+
+
 float thresholdTouch = 0.1;
-std::string configMode = "OFF";
+//std::string configMode = "OFF";
 int voiceCount = 1;
 bool holdMode = false;
 

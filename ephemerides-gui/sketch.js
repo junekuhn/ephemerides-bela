@@ -31,9 +31,9 @@ let channelGains = [0.5, 0.2, 0.99,0.3, 0.2, 0.4, 0.2, 0.2, 0.3];
 let config;
 let leftMeter, rightMeter, leftGain, rightGain;
 let labels = {
-  pots: ["Synth Gain", "High Frequency Boost", "Filter Q", "Filter Gain", "Lowpass Cutoff", "Mic Gain", "Filter Channel Gain", "Limiter Threshold", "Limiter Lookahead", "Limiter Release", "Reference Frequency", "Feedback Amount", "Glide", "Synth Attack", "Synth Release", ""],
+  pots: ["Synth Gain", "High Frequency Boost", "Filter Q", "Filter Gain", "Lowpass Cutoff", "Mic Gain", "Filter Channel Gain", "Limiter Threshold", "Limiter Lookahead", "Limiter Release", "Reference Frequency", "Feedback Amount", "Glide", "Synth Attack", "Synth Release", "Panning"],
   presetButtons: [],
-  big: ["Save Preset", "Set Reference", "Output Toggle"],
+  big: ["Save Preset", "Set Reference", "Output Toggle", "Drone Mode"],
   freq: ["Mic Input", "Keyboard Input", "Last Selected"],
   register: ["Numerator", "Denominator", "Divisor", "Index", "Algorithm"]
 }
@@ -88,9 +88,10 @@ function setup() {
   presetButtons = new buttonArray(presetCoords, presetCoords.length, 12,12, type="PRESET");
   
   let bigButtonCoords = [
-    createVector(-3, 10),
-    createVector(0, 10),
-    createVector(3, 10)
+    createVector(-4, 10),
+    createVector(-1, 10),
+    createVector(2, 10),
+    createVector(5, 10)
   ]
   bigButtons = new buttonArray(bigButtonCoords, bigButtonCoords.length, 12, 16, type="BIG");
   
@@ -466,7 +467,7 @@ function updateFreq(e) {
 
 function updatePreset(e) {
 	//value from 1 to 12
-	Bela.data.sendBuffer(1, "float", e.target.value)
+	Bela.data.sendBuffer(1, "float", [e.target.value]);
 }
 
 function updatePot(e) {
