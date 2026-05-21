@@ -113,7 +113,7 @@ struct BufferState {
     int   potIndex;         // Buffer 0
     float potValue;
     int   activePreset;     // Buffer 1 
-    float touchValue;   	// Buffer 2 
+    bool touchValue = false;   	// Buffer 2 
     int   touchIndex;
     int   registerIndex;	// Buffer 3
     int   registerValue;
@@ -176,8 +176,12 @@ struct DeviceState {
 	//config data
 	float numerator = 2;
 	float denominator = 1;
-	float divisor = 4;
+	float divisor = 6;
 	algorithms selectedAlgorithm = ARITHMETIC_DIVISION;
+	//  means off, 
+	bool oscillatorsOn[NUM_OSCS] =	{false, true, false, true, false, false, true, false};
+	int noteIndex[NUM_OSCS] =		{0, 1, 1, 1, 0, 1, 0, 0};
+	float targetRatio[NUM_OSCS] =	{0, 1, 0, 1, 0, 0, 0, 0};
 	
 };
 
@@ -187,7 +191,6 @@ DeviceState gDeviceState;
 // int keys[NUM_KEYS] = {8,9,10,11,12,13,14,15,16,17,18,19,20,21};
 //with two broken keys
 int keys[NUM_KEYS] = {8,9,11,12,13,14,15,16,17,18,19,21};
-int oscillatorsOn[NUM_OSCS] = {0, 1, 2, 3, 4, 5, 6, 7};
 
 ADSR envelopes[NUM_OSCS]; // ADSR envelope
 
@@ -198,7 +201,7 @@ float gSustain = 0.9; // Envelope sustain level
 
 float gFrequencies[NUM_OSCS]; // Oscillator frequency (Hz)
 float gPhases[NUM_OSCS]; // Oscillator phase
-float targetRatio[NUM_OSCS] = {0,0,0,0,0,0, 0, 0};
+
 float gInverseSampleRate;
 
 float jPhase = 0.0;
@@ -215,7 +218,7 @@ bool holdMode = false;
 
 
 
-bool needsUpdate = false;
+bool gNeedsUpdate = false;
 
 
 

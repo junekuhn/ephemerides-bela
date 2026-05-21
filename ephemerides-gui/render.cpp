@@ -1,5 +1,7 @@
 #include <render.h>
 
+
+//converting from midi key to index
 int displaceIndex(int key) {
 	int offset = NUM_KEYS - 1;
 	int c = 0;
@@ -15,16 +17,16 @@ int displaceIndex(int key) {
 	return key - c;
 }
 
-void printTask() {
+void printTask(float myFloat) {
     if(!gNewData) return;
 
     rt_printf("=== DeviceState ===\n");
 
   //  rt_printf("Pots:\n");
-    rt_printf("%i \n", gDeviceState.micButton);
-    rt_printf("%i \n", gDeviceState.keyboardButton);
-    rt_printf("%i \n", gDeviceState.lastSelectedButton);
-        rt_printf("%f \n", gBufferState.freqButtons);
+    rt_printf("%f \n", gDeviceState.divisor);
+  //  rt_printf("%i \n", gDeviceState.keyboardButton);
+   // rt_printf("%i \n", gDeviceState.lastSelectedButton);
+  //      rt_printf("%f \n", gBufferState.freqButtons);
 
 
     gNewData = false;
@@ -59,20 +61,131 @@ void loop(void*)
 	// int speed = 0;
 	while(!Bela_stopRequested())
 	{
+
 		
-       // if (needsUpdate) {
+		//receiving buffer data 
+		DataBuffer& potsBuf = gui.getDataBuffer(0);
+		DataBuffer& presetBuf = gui.getDataBuffer(1);
+		DataBuffer& touchBuf = gui.getDataBuffer(2);
+		DataBuffer& registerBuf = gui.getDataBuffer(3);
+		DataBuffer& bigBuf = gui.getDataBuffer(4);
+		DataBuffer& freqBuf = gui.getDataBuffer(5);
+		
+		// Retrieve contents of the buffer as floats
+			//store in struct 
+		unsigned int blength = touchBuf.getNumElements();
+		
+		if(touchBuf.getNumElements()>0){
+			float* touchData = touchBuf.getAsFloat();
+			gBufferState.touchIndex = (int) touchData[0];
+			gBufferState.touchValue =  touchData[1] != 0;
+			
+				    	//update noteIndex
+        	if(gBufferState.touchIndex < NUM_OSCS) {
+        		gDeviceState.noteIndex[gBufferState.touchIndex] = gBufferState.touchIndex;
+        		gDeviceState.oscillatorsOn[gBufferState.touchIndex] = gBufferState.touchValue;
+        	}
+			
+			//reset buffer
+		    touchBuf.getBuffer()->resize(0);
+		    gNeedsUpdate = true;
+		}
+		
+		if(potsBuf.getNumElements()>0){
+			float* potsData = potsBuf.getAsFloat();
+			gBufferState.potIndex = (int) potsData[0];
+			gBufferState.potValue = potsData[1];
+			
+			//reset buffer
+		    potsBuf.getBuffer()->resize(0);
+		    gNeedsUpdate = true;
+		}
+			
+		if(presetBuf.getNumElements()>0){
+			gBufferState.activePreset = (int) presetBuf.getAsFloat()[0];
+						
+			//reset buffer
+		    presetBuf.getBuffer()->resize(0);
+		    gNeedsUpdate = true;
+		}
+		
+		if(registerBuf.getNumElements()>0){
+			float* registerData = registerBuf.getAsFloat();
+			gBufferState.registerIndex = (int) registerData[0];
+			gBufferState.registerValue = (int) registerData[1];
+			
+			switch(gBufferState.registerIndex) {
+				//numerator has to be 1 or higher
+				case 0:
+					gDeviceState.numerator = gBufferState.registerValue;
+				case 1:
+					gDeviceState.denominator = gBufferState.registerValue;
+					break;
+				case 2:
+					gDeviceState.divisor = gBufferState.registerValue+1;
+					break;
+				case 4:
+					gDeviceState.selectedAlgorithm = (algorithms) gBufferState.registerValue;
+					break;
+				default:
+					break;
+			}
+			
+			//reset buffer
+		    registerBuf.getBuffer()->resize(0);
+		    gNeedsUpdate = true;
+		    
+		    gNewData = true;
+			printTask(registerData[1]);
+		}
+
+		if(bigBuf.getNumElements()>0){	    	
+	    	float* bigData = bigBuf.getAsFloat();
+			uint32_t mask2 = (uint32_t) bigData[0];
+	    	gDeviceState.savePresetButton = (mask2 >> 0) & 1;
+	    	gDeviceState.setReferenceButton = (mask2 >> 1) & 1;
+	    	gDeviceState.toggleOutputButton = (mask2 >> 2) & 1;
+	    	gDeviceState.droneModeButton = (mask2 >> 2) & 1;
+	    	
+	    	
+	    	//reset buffer
+		    bigBuf.getBuffer()->resize(0);
+		    gNeedsUpdate = true;
+		}
+
+		if(freqBuf.getNumElements()>0){	    	
+	        float* freqData = freqBuf.getAsFloat();
+			uint32_t mask = (uint32_t) freqData[0];
+	    	gDeviceState.micButton = (mask >> 0) & 1;
+	    	gDeviceState.keyboardButton = (mask >> 1) & 1;
+	    	gDeviceState.lastSelectedButton = (mask >> 2) & 1;
+	    	
+	    	//reset buffer
+		    freqBuf.getBuffer()->resize(0);
+		    gNeedsUpdate = true;
+		}
+
+		
+        if (gNeedsUpdate) {
+        	
+
+        	
+        	
 			// loop through the oscillator bank
 			for(int l = 0; l<NUM_OSCS; l++) {
 				//if osc is on, update
 
 			//calculate new frequency
 			// printf("update=ing %i\n", l);
-		//	targetRatio[l] = calculateRatio(gDeviceState.selectedAlgorithm, displaceIndex( oscillatorsOn[l] ));
+			if(gDeviceState.oscillatorsOn[l]) {
+				gDeviceState.targetRatio[l] = calculateRatio(gDeviceState.selectedAlgorithm, gDeviceState.noteIndex[l]);	
+			}
 
 			//pull current frequencies and update filters
 		 //   s.cutoff = gFrequencies[l];
 		//	filterBank[l].setup(s);		
-			
+			gNeedsUpdate = false;
+        	}
         }
                 
 		usleep(50000);
@@ -90,7 +203,7 @@ bool setup(BelaContext *context, void *userData)
 	//gui set buffers
 	gui.setBuffer('f', 2);  
 	gui.setBuffer('f', 1);
-	gui.setBuffer('f', 1);
+	gui.setBuffer('f', 2);
 	gui.setBuffer('f', 2);
 	gui.setBuffer('f', 1);
 	gui.setBuffer('f', 1);
@@ -145,55 +258,8 @@ bool setup(BelaContext *context, void *userData)
 void render(BelaContext *context, void *userData)
 {
 	
-     //We create an auxiliary counter variable that will indicate when to send the buffer
+				    //We create an auxiliary counter variable that will indicate when to send the buffer
 	static unsigned int count = 0;
-	
-	//receiving buffer data 
-	DataBuffer& potsBuf = gui.getDataBuffer(0);
-	DataBuffer& presetBuf = gui.getDataBuffer(1);
-	DataBuffer& touchBuf = gui.getDataBuffer(2);
-	DataBuffer& registerBuf = gui.getDataBuffer(3);
-	DataBuffer& bigBuf = gui.getDataBuffer(4);
-	DataBuffer& freqBuf = gui.getDataBuffer(5);
-	
-	// Retrieve contents of the buffer as floats
-		//store in struct 
-	unsigned int blength = potsBuf.getNumElements();
-	if(blength>0){
-		float* potsData = potsBuf.getAsFloat();
-		gBufferState.potIndex = (int) potsData[0];
-		gBufferState.potValue = potsData[1];
-		
-		gBufferState.activePreset = (int) presetBuf.getAsFloat()[0];
-		
-		float* touchData = touchBuf.getAsFloat();
-		gBufferState.touchIndex = (int) touchData[0];
-		gBufferState.touchValue = touchData[1];
-		
-		float* registerData = registerBuf.getAsFloat();
-		gBufferState.registerIndex = (int) registerData[0];
-		gBufferState.registerValue = (int) registerData[1];
-    	
-    	float* bigData = bigBuf.getAsFloat();
-		uint32_t mask2 = (uint32_t) bigData[0];
-    	gDeviceState.savePresetButton = (mask2 >> 0) & 1;
-    	gDeviceState.setReferenceButton = (mask2 >> 1) & 1;
-    	gDeviceState.toggleOutputButton = (mask2 >> 2) & 1;
-    	gDeviceState.droneModeButton = (mask2 >> 2) & 1;
-    	
-        float* freqData = freqBuf.getAsFloat();
-		uint32_t mask = (uint32_t) freqData[0];
-    	gDeviceState.micButton = (mask >> 0) & 1;
-    	gDeviceState.keyboardButton = (mask >> 1) & 1;
-    	gDeviceState.lastSelectedButton = (mask >> 2) & 1;
-		
-		gNewData = true;
-		
-	//	printTask();
-	//	if(gBufferState.potIndex>0) printTask();
-	}
-
-	
 	
 	for(unsigned int n = 0; n < context->audioFrames; n++) {
 		
@@ -242,14 +308,15 @@ void render(BelaContext *context, void *userData)
 			//filterBank[i].process(input);
 			filterChannels[i] = filterBank[i].process(filterChannels[i]);
 			filterChannels[i] = inputLimiter.processSample(filterChannels[i]);
-			out += filterChannels[i] ;
+			//out += filterChannels[i] ;
 			feedback += filterChannels[i];
 			
+			float amp =  gAmplitude * 1./ ((float) NUM_OSCS);
 
-			float amp = gAmplitude * 1./ ((float) NUM_OSCS);
 		//	float amp = gAmplitude;
 			//* envelopes[i].process();
 			// float amp = gAmplitudes[i] * 0.8;
+			
 
 			out += sinf(gPhases[i]) * amp;
 			//out += sinf();
@@ -290,14 +357,16 @@ void render(BelaContext *context, void *userData)
 
 			
 			//glide 
-			//gFrequencies[i] = gFrequencies[i] + ((targetRatio[i]* gDeviceState.baseFrequency) - gFrequencies[i]) / (gDeviceState.glideAmount*gDeviceState.glideAmount);
+			gFrequencies[i] = gFrequencies[i] + ((gDeviceState.targetRatio[i]* gDeviceState.baseFrequency) - gFrequencies[i]) / (gDeviceState.glideAmount*gDeviceState.glideAmount);
 
 	
 			// Compute phase
+			if(gDeviceState.oscillatorsOn[i]){
 			gPhases[i] += 2.0f * (float)M_PI * gFrequencies[i] * gInverseSampleRate;
 			//gPhases[i] += 2.0f * (float)M_PI * 300 * gInverseSampleRate;
 			if(gPhases[i] > M_PI)
 				gPhases[i] -= 2.0f * (float)M_PI;
+			}
 				
 			//finalOut += out;
 

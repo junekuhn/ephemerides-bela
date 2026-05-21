@@ -380,7 +380,9 @@ function updateArc(e) {
 		}
 		
 		//send register to bela
-		Bela.data.sendBuffer(3, "float", [outerArc.registerIndex, e.target.value]);
+		Bela.data.sendBuffer(3, 'float', [outerArc.registerIndex, e.target.value]);
+		
+		console.log([outerArc.registerIndex, e.target.value])
 		
 		outerArc.registerOn = false;
 		
@@ -403,7 +405,9 @@ function updateArc(e) {
     outerArc.state.colors[index] = color(e.target.checked ? 0:255, 0, 0)
     outerArc.state.touched[index] = e.target.checked;
     
-    let touchBufferArray = [index, outerArc.state.touched[index]];
+    //convert to float array first
+    let touchBufferArray = [parseFloat(index), + outerArc.state.touched[index]];
+   
     
     //send to bela 
     Bela.data.sendBuffer(2, 'float', touchBufferArray);
@@ -415,7 +419,7 @@ function updateBig(e) {
   
   bigButtons.state.mask = updateBitmask(bigButtons.state.mask, index, e.target.checked);
   
-  Bela.data.sendBuffer(4, "float", bigButtons.state.mask)
+  Bela.data.sendBuffer(4, 'float', bigButtons.state.mask)
 }
 
 function updateRegister(e) {
@@ -462,12 +466,12 @@ function updateFreq(e) {
   
   freqButtons.state.mask = updateBitmask(freqButtons.state.mask, index, e.target.checked);
   
-  Bela.data.sendBuffer(5, "float", freqButtons.state.mask)
+  Bela.data.sendBuffer(5, 'float', freqButtons.state.mask)
 }
 
 function updatePreset(e) {
 	//value from 1 to 12
-	Bela.data.sendBuffer(1, "float", [e.target.value]);
+	Bela.data.sendBuffer(1, 'float', [e.target.value]);
 }
 
 function updatePot(e) {
@@ -475,7 +479,7 @@ function updatePot(e) {
 	let potvalue = e.target.value;
 	let potindex = e.target.getAttribute("data-index");
 
-	Bela.data.sendBuffer(0, "float", [potindex, potvalue]);
+	Bela.data.sendBuffer(0, 'float', [potindex, potvalue]);
 }
 
 // Set or clear a bit by index and boolean value
