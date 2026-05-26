@@ -152,6 +152,7 @@ struct DeviceState {
 	bool droneModeButton;
 	
 	//potentiometers
+	float synthGain = 0.5;
 	float hiFreqBoost;
 	float filterQ;
 	float filterGain;
@@ -166,6 +167,7 @@ struct DeviceState {
 	float glideAmount = 10;
 	
 	//touch data 
+	int lastTouched = 0;
 	
 	//preset data 
 	int activePreset;
@@ -176,12 +178,14 @@ struct DeviceState {
 	//config data
 	float numerator = 2;
 	float denominator = 1;
-	float divisor = 6;
-	algorithms selectedAlgorithm = ARITHMETIC_DIVISION;
+	float divisor = 4;
+	int offset = 0;
+	algorithms selectedAlgorithm = 	RATIO_DIVISION;
 	//  means off, 
-	bool oscillatorsOn[NUM_OSCS] =	{false, true, false, true, false, false, true, false};
-	int noteIndex[NUM_OSCS] =		{0, 1, 1, 1, 0, 1, 0, 0};
+	bool oscillatorsOn[NUM_OSCS] =	{false, false, false, false, false, false, false, false};
+	int noteIndex[NUM_OSCS] =		{0, 0, 0, 0, 0, 0, 0, 0};
 	float targetRatio[NUM_OSCS] =	{0, 1, 0, 1, 0, 0, 0, 0};
+	float panning[NUM_OSCS] = {0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5};
 	
 };
 

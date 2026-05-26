@@ -22,12 +22,8 @@ void printTask(float myFloat) {
 
     rt_printf("=== DeviceState ===\n");
 
-  //  rt_printf("Pots:\n");
-    rt_printf("%f \n", gDeviceState.divisor);
-  //  rt_printf("%i \n", gDeviceState.keyboardButton);
-   // rt_printf("%i \n", gDeviceState.lastSelectedButton);
-  //      rt_printf("%f \n", gBufferState.freqButtons);
-
+    rt_printf("div, n, d:\n");
+    rt_printf("%f \n", myFloat);
 
     gNewData = false;
    	usleep(50000);
@@ -38,13 +34,13 @@ float calculateRatio(algorithms algo, int index) {
 	
 	switch(algo) {
 		case ARITHMETIC_DIVISION:
-			ratio = ((float) index + 1.f) * (gDeviceState.numerator - gDeviceState.denominator) / gDeviceState.divisor + gDeviceState.denominator;
+			ratio = ((float) index) * (gDeviceState.numerator - gDeviceState.denominator) / gDeviceState.divisor + gDeviceState.denominator;
 			break;
 		case RATIO_DIVISION:
-			ratio = ((float) index + 1.f) * (gDeviceState.numerator/gDeviceState.denominator) / gDeviceState.divisor;
+			ratio = ((float) index ) * (gDeviceState.numerator/gDeviceState.denominator) / gDeviceState.divisor;
 			break;
 		case TET:
-			ratio = pow( pow(gDeviceState.numerator / gDeviceState.denominator, 1 / gDeviceState.divisor), (float) index + 1.f);
+			ratio = pow( pow(gDeviceState.numerator / gDeviceState.denominator, 1 / gDeviceState.divisor), (float) index);
 			break;
 		default:
 			printf("error, invalid algorithm selection");
@@ -84,6 +80,7 @@ void loop(void*)
         	if(gBufferState.touchIndex < NUM_OSCS) {
         		gDeviceState.noteIndex[gBufferState.touchIndex] = gBufferState.touchIndex;
         		gDeviceState.oscillatorsOn[gBufferState.touchIndex] = gBufferState.touchValue;
+        		gDeviceState.lastTouched = gBufferState.touchIndex;
         	}
 			
 			//reset buffer
@@ -95,6 +92,43 @@ void loop(void*)
 			float* potsData = potsBuf.getAsFloat();
 			gBufferState.potIndex = (int) potsData[0];
 			gBufferState.potValue = potsData[1];
+			
+			switch(gBufferState.potIndex) {
+				case 0:
+					gDeviceState.synthGain = gBufferState.potValue;
+					break;
+				case 2:
+					gDeviceState.filterQ = gBufferState.potValue * 10.;
+					break;
+				case 3:
+					gDeviceState.filterGain = gBufferState.potValue * 20.;
+					break;
+				case 7:
+					gDeviceState.limiterThresh = gBufferState.potValue;
+					break;
+				case 8:
+					gDeviceState.limiterLookahead = gBufferState.potValue;
+					break;			
+				case 9:
+					gDeviceState.limiterRelease = gBufferState.potValue;
+					break;
+				case 10:
+					gDeviceState.baseFrequency = gBufferState.potValue * 1000.;
+					break;
+				case 11:
+					gDeviceState.fbAmount = gBufferState.potValue;
+					break;
+				case 12:
+					gDeviceState.glideAmount = gBufferState.potValue * 100.;
+					break;
+				case 15:
+					gDeviceState.panning[gDeviceState.lastTouched] = gBufferState.potValue;
+					break;
+				default:
+					break;
+			}
+			
+			printTask(gBufferState.potValue);
 			
 			//reset buffer
 		    potsBuf.getBuffer()->resize(0);
@@ -117,12 +151,16 @@ void loop(void*)
 			switch(gBufferState.registerIndex) {
 				//numerator has to be 1 or higher
 				case 0:
-					gDeviceState.numerator = gBufferState.registerValue;
+					gDeviceState.numerator = gBufferState.registerValue+1;
+					break;
 				case 1:
-					gDeviceState.denominator = gBufferState.registerValue;
+					gDeviceState.denominator = gBufferState.registerValue+1;
 					break;
 				case 2:
 					gDeviceState.divisor = gBufferState.registerValue+1;
+					break;
+				case 3:
+					gDeviceState.offset = gBufferState.registerValue;
 					break;
 				case 4:
 					gDeviceState.selectedAlgorithm = (algorithms) gBufferState.registerValue;
@@ -136,7 +174,7 @@ void loop(void*)
 		    gNeedsUpdate = true;
 		    
 		    gNewData = true;
-			printTask(registerData[1]);
+
 		}
 
 		if(bigBuf.getNumElements()>0){	    	
@@ -178,7 +216,7 @@ void loop(void*)
 			//calculate new frequency
 			// printf("update=ing %i\n", l);
 			if(gDeviceState.oscillatorsOn[l]) {
-				gDeviceState.targetRatio[l] = calculateRatio(gDeviceState.selectedAlgorithm, gDeviceState.noteIndex[l]);	
+				gDeviceState.targetRatio[l] = calculateRatio(gDeviceState.selectedAlgorithm, gDeviceState.noteIndex[l] + gDeviceState.offset);	
 			}
 
 			//pull current frequencies and update filters
@@ -197,6 +235,9 @@ bool setup(BelaContext *context, void *userData)
 	gInverseSampleRate = 1.0 / context->audioSampleRate;
 
 	scope.setup(NUM_OSCS, context->audioSampleRate);
+	
+	rt_printf("Num Channels Out \n");
+	rt_printf("%f", context->audioOutChannels);
 	
 	gui.setup(context->projectName);
 	
@@ -219,7 +260,7 @@ bool setup(BelaContext *context, void *userData)
 	for(int k = 0; k<NUM_OSCS; k++) {
 		gPhases[k] = 0.0;
 		gFrequencies[k] = 300.0 * (k+1);
-		gAmplitude = 0.8f;
+		gDeviceState.synthGain = 0.8f;
 		filterChannels[k] = 0;
 	}
 
@@ -267,7 +308,7 @@ void render(BelaContext *context, void *userData)
 		count++;
 		
 		float out = 0;
-		float finalOut = 0;
+		float outArray[context->audioOutChannels];
 		float input = 0;
 		float feedback = 0;
 
@@ -311,7 +352,7 @@ void render(BelaContext *context, void *userData)
 			//out += filterChannels[i] ;
 			feedback += filterChannels[i];
 			
-			float amp =  gAmplitude * 1./ ((float) NUM_OSCS);
+			float amp =  gDeviceState.synthGain * 1./ ((float) NUM_OSCS);
 
 		//	float amp = gAmplitude;
 			//* envelopes[i].process();
@@ -319,6 +360,11 @@ void render(BelaContext *context, void *userData)
 			
 
 			out += sinf(gPhases[i]) * amp;
+			
+			outArray[0] += sinf(gPhases[i]) * amp * (1 - gDeviceState.panning[i]);
+			outArray[1] += sinf(gPhases[i]) * amp * gDeviceState.panning[i];
+			
+			
 			//out += sinf();
 
 			// switch(gOscType) {
@@ -368,8 +414,6 @@ void render(BelaContext *context, void *userData)
 				gPhases[i] -= 2.0f * (float)M_PI;
 			}
 				
-			//finalOut += out;
-
 			//output to scope
 			//gOutput[i] = out * NUM_OSCS;
 			
@@ -380,15 +424,19 @@ void render(BelaContext *context, void *userData)
 		//feedback
 	//	out += input;
 		//output limiter
+	//	outL = outputLimiter.processSample(outL);
+	//	outR = outputLimiter.processSample(outR);
 		out = outputLimiter.processSample(out);
 
 //		gOutput[0] = finalOut;
-
 //		scope.log(gOutput);
+
+		
 
 		// Write output to different channels
 		for(unsigned int channel = 0; channel < context->audioOutChannels; channel++) {
-			audioWrite(context, n, channel, out);
+			 audioWrite(context, n, channel, outArray[channel]);
+		//	audioWrite(context, n, channel, out);
 		}
 		
 		//send to gui

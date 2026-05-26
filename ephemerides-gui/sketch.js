@@ -114,6 +114,9 @@ function setup() {
   leftMeter = new Meter(-1*12, 8*12, 12, 60, 8);
   rightMeter = new Meter(12, 8*12, 12, 60, 8);
   
+  //send initial values
+  sendInit()
+  
   
 }
 
@@ -178,7 +181,7 @@ class arcTouch {
     this.maxTouchPoints = 4;
     this.init();
     //what states each register is in
-    this.registerStates = [1, 0, 12, 0, 1];
+    this.registerStates = [1, 0, 3, 0, 1];
     this.registerOn = false;
     this.registerIndex = 0;
   }
@@ -256,7 +259,7 @@ class buttonArray {
           
         if(this.type == "POT") {
           //create sliders
-          this.state.elements.push(createSlider(0, 255, 0, 10));
+          this.state.elements.push(createSlider(0, 1, 0, 0.01));
           this.state.elements[button].elt.setAttribute("data-index", `${button}`);
           this.state.elements[button].position(width*.5, 40 + button*20);
           this.state.elements[button].size(100);
@@ -488,4 +491,19 @@ function updateBitmask(mask, index, value) {
         return (mask | (1 << index)) >>> 0;   
     else
         return (mask & ~(1 << index)) >>> 0;  
+}
+
+function sendInit() {
+	
+	//no touch initially
+	
+	//register
+	//num = 2
+	Bela.data.sendBuffer(3, 'float', [0, outerArc.registerStates[0]]);
+	//denom = 1
+	Bela.data.sendBuffer(3, 'float', [1, outerArc.registerStates[1]]);
+	//div = 4
+	Bela.data.sendBuffer(3, 'float', [2, outerArc.registerStates[2]]);
+	
+	
 }
