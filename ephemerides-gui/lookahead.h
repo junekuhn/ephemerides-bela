@@ -4,12 +4,16 @@
 
 class Limiter {
 public:
-    void setup(float sampleRate) {
+
+	float iThreshold;
+	float sampleRate;
+	
+    void setup(float sampleRate, float threshold, float lookahead, float release) {
         this->sampleRate = sampleRate;
 
-        setLookaheadMs(1.0f);   // ~2 ms
-        setReleaseMs(50.0f);    // smooth release
-        threshold = 0.95f;
+        setLookaheadMs(lookahead);   // ~2 ms
+        setReleaseMs(release);    // smooth release
+        iThreshold = threshold;
     }
 
     void setLookaheadMs(float ms) {
@@ -44,17 +48,15 @@ public:
 
         // Gain computation
         float gain = 1.0f;
-        if (envelope > threshold) {
+        if (envelope > iThreshold) {
 			//proportially scaling down the gain to smooth the input signal
-            gain = threshold / envelope;
+            gain = iThreshold / envelope;
         }
 
         return delayed * gain;
     }
 
 private:
-    float sampleRate;
-    float threshold = 0.95f;
 
     float envelope = 0.0f;
     float releaseCoeff = 0.999f;

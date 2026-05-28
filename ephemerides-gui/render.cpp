@@ -17,6 +17,16 @@ int displaceIndex(int key) {
 	return key - c;
 }
 
+void storePreset(DeviceState currentState, int index) {
+	if(index < 10 && index >= 0) {
+		gPresets[index] = currentState;
+	}
+}
+
+DeviceState recallPreset(int index) {
+	return gPresets[index];
+}
+
 void printTask(float myFloat) {
     if(!gNewData) return;
 
@@ -26,7 +36,7 @@ void printTask(float myFloat) {
     rt_printf("%f \n", myFloat);
 
     gNewData = false;
-   	usleep(50000);
+   	usleep(5000);
 }
 
 float calculateRatio(algorithms algo, int index) {
@@ -82,6 +92,14 @@ void loop(void*)
         		gDeviceState.oscillatorsOn[gBufferState.touchIndex] = gBufferState.touchValue;
         		gDeviceState.lastTouched = gBufferState.touchIndex;
         	}
+        	
+        	numOscillatorsOn = 0;
+        	
+        	for(int i = 0; i<NUM_OSCS; i++) {
+        		if(gDeviceState.oscillatorsOn[i])
+        		numOscillatorsOn++;
+        	}
+
 			
 			//reset buffer
 		    touchBuf.getBuffer()->resize(0);
@@ -95,31 +113,42 @@ void loop(void*)
 			
 			switch(gBufferState.potIndex) {
 				case 0:
-					gDeviceState.synthGain = gBufferState.potValue;
+					gDeviceState.synthGain = gBufferState.potValue*2;
+					break;
+				case 1:
+					gDeviceState.hiFreqBoost = gBufferState.potValue*0.5;
 					break;
 				case 2:
-					gDeviceState.filterQ = gBufferState.potValue * 10.;
+					//from 0.3 to 20.3
+					gDeviceState.filterQ = gBufferState.potValue*200. + 50;
 					break;
 				case 3:
-					gDeviceState.filterGain = gBufferState.potValue * 20.;
+					// from 0 to 100
+					gDeviceState.filterGain = gBufferState.potValue * 100.;
+					break;
+				case 4:
+					gDeviceState.lpCutoff = gBufferState.potValue*4000 + 2000;
+					break;
+				case 5:
+					gDeviceState.micGain = gBufferState.potValue*10.;
 					break;
 				case 7:
-					gDeviceState.limiterThresh = gBufferState.potValue;
+					gDeviceState.limiterThresh = gBufferState.potValue * 3 + 0.8;
 					break;
 				case 8:
-					gDeviceState.limiterLookahead = gBufferState.potValue;
+					gDeviceState.limiterLookahead = gBufferState.potValue * 50 + 5;
 					break;			
 				case 9:
-					gDeviceState.limiterRelease = gBufferState.potValue;
+					gDeviceState.limiterRelease = gBufferState.potValue * 100 + 5;
 					break;
 				case 10:
 					gDeviceState.baseFrequency = gBufferState.potValue * 1000.;
 					break;
 				case 11:
-					gDeviceState.fbAmount = gBufferState.potValue;
+					gDeviceState.fbAmount = gBufferState.potValue*40.;
 					break;
 				case 12:
-					gDeviceState.glideAmount = gBufferState.potValue * 100.;
+					gDeviceState.glideAmount = gBufferState.potValue * 1000.;
 					break;
 				case 15:
 					gDeviceState.panning[gDeviceState.lastTouched] = gBufferState.potValue;
@@ -137,6 +166,8 @@ void loop(void*)
 			
 		if(presetBuf.getNumElements()>0){
 			gBufferState.activePreset = (int) presetBuf.getAsFloat()[0];
+			
+			gDeviceState = recallPreset(gBufferState.activePreset);
 						
 			//reset buffer
 		    presetBuf.getBuffer()->resize(0);
@@ -186,6 +217,13 @@ void loop(void*)
 	    	gDeviceState.droneModeButton = (mask2 >> 2) & 1;
 	    	
 	    	
+	    	if(gDeviceState.savePresetButton) {
+	    		storePreset(gDeviceState, gDeviceState.activePreset);
+	    		gDeviceState.savePresetButton = false;
+	    	}
+	    	
+	    	
+	    	
 	    	//reset buffer
 		    bigBuf.getBuffer()->resize(0);
 		    gNeedsUpdate = true;
@@ -203,28 +241,7 @@ void loop(void*)
 		    gNeedsUpdate = true;
 		}
 
-		
-        if (gNeedsUpdate) {
-        	
-
-        	
-        	
-			// loop through the oscillator bank
-			for(int l = 0; l<NUM_OSCS; l++) {
-				//if osc is on, update
-
-			//calculate new frequency
-			// printf("update=ing %i\n", l);
-			if(gDeviceState.oscillatorsOn[l]) {
-				gDeviceState.targetRatio[l] = calculateRatio(gDeviceState.selectedAlgorithm, gDeviceState.noteIndex[l] + gDeviceState.offset);	
-			}
-
-			//pull current frequencies and update filters
-		 //   s.cutoff = gFrequencies[l];
-		//	filterBank[l].setup(s);		
-			gNeedsUpdate = false;
-        	}
-        }
+	
                 
 		usleep(50000);
 	}
@@ -252,9 +269,16 @@ bool setup(BelaContext *context, void *userData)
 
 	//setup filter settings
 	s.fs = context->audioSampleRate;
-	s.q = 3.0;
-	s.peakGainDb = 8;
-	s.type = Biquad::peak;
+	s.q = gDeviceState.filterQ;
+	s.peakGainDb = gDeviceState.filterGain;
+	s.type = Biquad::bandpass;
+	
+	lps.fs = context->audioSampleRate;
+	lps.q = 0.707;
+	lps.peakGainDb = 0;
+	lps.type = Biquad::lowpass;
+	lps.cutoff = gDeviceState.lpCutoff;
+	lpfilter.setup(lps);
 
 	
 	for(int k = 0; k<NUM_OSCS; k++) {
@@ -265,13 +289,16 @@ bool setup(BelaContext *context, void *userData)
 	}
 
 	//setup filters
+	rt_printf("setup(): ");
 	for(int i = 0;i<NUM_OSCS;i++){
+		rt_printf("(%f, %f, %f) ", gFrequencies[i], s.q, s.peakGainDb);
 		s.cutoff = gFrequencies[i];
-		s.peakGainDb = 20+3*(i+1);
+	//	s.peakGainDb = 20+3*(i+1);
 		filterBank[i].setup(s);	
 		
 	//	rt_printf("%f /n",filterBank[i].type);
 	}
+	rt_printf("\n");
 
 
 
@@ -287,9 +314,9 @@ bool setup(BelaContext *context, void *userData)
 		// Useful calculations
 	gAudioFramesPerAnalogFrame = context->audioFrames / context->analogFrames;
 
-	// setup limiter params
-	inputLimiter.setup(context->audioSampleRate);
-	outputLimiter.setup(context->audioSampleRate);
+	
+	inputLimiter.setup(context->audioSampleRate, gDeviceState.limiterThresh, gDeviceState.limiterLookahead, gDeviceState.limiterRelease);
+	outputLimiter.setup(context->audioSampleRate, gDeviceState.limiterThresh, gDeviceState.limiterLookahead, gDeviceState.limiterRelease);
 
 	Bela_runAuxiliaryTask(loop);
 	
@@ -307,10 +334,13 @@ void render(BelaContext *context, void *userData)
 	    //count will increase at each audio frame by one
 		count++;
 		
-		float out = 0;
+	//	float out = 0;
 		float outArray[context->audioOutChannels];
 		float input = 0;
 		float feedback = 0;
+		float amp = 0;
+		outArray[0] = 0;
+		outArray[1] = 0;
 
 		//input
 		if(gAudioFramesPerAnalogFrame && !(n % gAudioFramesPerAnalogFrame)) {
@@ -319,14 +349,16 @@ void render(BelaContext *context, void *userData)
 			//gDeviceState.baseFrequency = 110 * pow( pow( 2.0 , 0.083333), multiplier);
 			//gAmplitude = map(analogRead(context, n/gAudioFramesPerAnalogFrame, analogAmplitude), 0, 1, 0.1, 1);
 
-			
-	
 		}
+		
+		
+		if(gMicOn) {
 		//mic input on channel 0
 	     input = audioRead(context, n, 0);	
 
 		//input gain
-		input *= 3.0;
+		input  = input * gDeviceState.micGain;
+		}
 
 	//	gOutput[0] = input;
 
@@ -336,33 +368,39 @@ void render(BelaContext *context, void *userData)
 
 	//	gOutput[1] = input;
 		
+		static unsigned int printCount = 0;
 
 
 		for(int i = 0; i<NUM_OSCS; i++) {
 
 			//copy input to each channel
 			filterChannels[i] = 0;
-			filterChannels[i] = input;
-			
 			
 			//filter input does it in place
-			//filterBank[i].process(input);
-			filterChannels[i] = filterBank[i].process(filterChannels[i]);
+			filterChannels[i] = filterBank[i].process(input);
+		//	filterChannels[i] = filterBank[i].process((float)rand() / (float)RAND_MAX);
+		//	filterChannels[i] *= (i * gDeviceState.hiFreqBoost) + 1;
 			filterChannels[i] = inputLimiter.processSample(filterChannels[i]);
-			//out += filterChannels[i] ;
-			feedback += filterChannels[i];
 			
-			float amp =  gDeviceState.synthGain * 1./ ((float) NUM_OSCS);
+			if(gFeedbackOn) {
+				feedback += filterChannels[i] * gDeviceState.fbAmount;
+			} else {
+				//just mic
+				feedback += input / ((float) NUM_OSCS);
+			}
+			
+			if(gDeviceState.toggleOutputButton) {
+				amp =  gDeviceState.synthGain * 1./ ((float) NUM_OSCS);
+			} else {
+				amp = 0;
+			}
+			
+			// if(++printCount >= 22050) {
+			// 	printCount = 0;
+			// 	rt_printf("%f %f %f %f\n", filterChannels[0], filterChannels[1], filterChannels[2], filterChannels[3]);
+			// }
+			
 
-		//	float amp = gAmplitude;
-			//* envelopes[i].process();
-			// float amp = gAmplitudes[i] * 0.8;
-			
-
-			out += sinf(gPhases[i]) * amp;
-			
-			outArray[0] += sinf(gPhases[i]) * amp * (1 - gDeviceState.panning[i]);
-			outArray[1] += sinf(gPhases[i]) * amp * gDeviceState.panning[i];
 			
 			
 			//out += sinf();
@@ -394,14 +432,6 @@ void render(BelaContext *context, void *userData)
 			// 		out += 1 - (1 / (float)M_PI * gPhases[i]);
 			// 		break;
 			// 	}
-		
-			//out += sinf(jPhase);
-
-			//feedback
-			//out += filterChannels[i];
-
-
-			
 			//glide 
 			gFrequencies[i] = gFrequencies[i] + ((gDeviceState.targetRatio[i]* gDeviceState.baseFrequency) - gFrequencies[i]) / (gDeviceState.glideAmount*gDeviceState.glideAmount);
 
@@ -409,9 +439,12 @@ void render(BelaContext *context, void *userData)
 			// Compute phase
 			if(gDeviceState.oscillatorsOn[i]){
 			gPhases[i] += 2.0f * (float)M_PI * gFrequencies[i] * gInverseSampleRate;
-			//gPhases[i] += 2.0f * (float)M_PI * 300 * gInverseSampleRate;
+
 			if(gPhases[i] > M_PI)
-				gPhases[i] -= 2.0f * (float)M_PI;
+			{	gPhases[i] -= 2.0f * (float)M_PI; }
+				
+			outArray[0] += sinf(gPhases[i]) * amp * (1 - gDeviceState.panning[i]) + feedback;
+			outArray[1] += sinf(gPhases[i]) * amp * gDeviceState.panning[i] + feedback;
 			}
 				
 			//output to scope
@@ -424,12 +457,16 @@ void render(BelaContext *context, void *userData)
 		//feedback
 	//	out += input;
 		//output limiter
-	//	outL = outputLimiter.processSample(outL);
-	//	outR = outputLimiter.processSample(outR);
-		out = outputLimiter.processSample(out);
+		
+		outArray[0] = lpfilter.process(outArray[0]);
+		outArray[1] = lpfilter.process(outArray[1]);
+		outArray[0] = outputLimiter.processSample(outArray[0]);
+		outArray[1] = outputLimiter.processSample(outArray[1]);
+		
+	//	out = outputLimiter.processSample(out);
 
-//		gOutput[0] = finalOut;
-//		scope.log(gOutput);
+		gOutput[0] = outArray[0];
+		scope.log(input, feedback, outArray[0]);
 
 		
 
@@ -443,8 +480,8 @@ void render(BelaContext *context, void *userData)
 		if (count >= gTimePeriod*context->audioSampleRate)
 		{
 			
-			gui.sendBuffer(0, abs(feedback));
-			gui.sendBuffer(1, abs(out));
+			gui.sendBuffer(0, abs(input));
+			gui.sendBuffer(1, abs(feedback));
 			
 			//rt_printf("%f", out);
 
@@ -452,6 +489,44 @@ void render(BelaContext *context, void *userData)
 			count = 0;
 		}
 	}
+	
+	 if (gNeedsUpdate) {
+        	
+			rt_printf("Update: ");
+        	
+        	
+			// loop through the oscillator bank
+			for(int l = 0; l<NUM_OSCS; l++) {
+				//if osc is on, update
+
+				//calculate new frequency
+				// printf("update=ing %i\n", l);
+					gDeviceState.targetRatio[l] = calculateRatio(gDeviceState.selectedAlgorithm, gDeviceState.noteIndex[l] + gDeviceState.offset);	
+									//pull current frequencies and update filters
+					s.fs = context->audioSampleRate;
+					s.type = Biquad::bandpass;
+					s.q = gDeviceState.filterQ;
+					s.peakGainDb = gDeviceState.filterGain;
+					//instead of gfreqs, just advance it for now
+				    s.cutoff = gDeviceState.targetRatio[l] * gDeviceState.baseFrequency;
+
+					filterBank[l].setup(s);		
+				//	filterBank[l].clean();
+					
+					rt_printf("%d ", gDeviceState.oscillatorsOn[l]);
+
+				
+				rt_printf("\n");
+	
+
+        	}
+        	
+        	inputLimiter.setup(context->audioSampleRate, gDeviceState.limiterThresh, gDeviceState.limiterLookahead, gDeviceState.limiterRelease);
+			outputLimiter.setup(context->audioSampleRate, gDeviceState.limiterThresh, gDeviceState.limiterLookahead, gDeviceState.limiterRelease);
+
+			gNeedsUpdate = false;
+        }
+	
 }
 
 void cleanup(BelaContext *context, void *userData)

@@ -22,6 +22,12 @@
 #define analogBaseFreq 0 
 #define analogAmplitude 1
 
+
+//UTILITY GLOBALS
+bool gMicOn = true;
+bool gFeedbackOn = true;
+int numOscillatorsOn = 0;
+
 // dark purple - 3.3v
 // grey - gnd 
 // white - sda 
@@ -148,29 +154,32 @@ struct DeviceState {
 	bool lastSelectedButton;
 	bool savePresetButton;
 	bool setReferenceButton;
-	bool toggleOutputButton;
+	bool toggleOutputButton = false;
 	bool droneModeButton;
 	
 	//potentiometers
 	float synthGain = 0.5;
-	float hiFreqBoost;
-	float filterQ;
-	float filterGain;
-	float lpCutoff;
-	float micGain;
-	float filterChannelGain;
-	float limiterThresh;
-	float limiterLookahead;
-	float limiterRelease;
+	float hiFreqBoost = 0;
+	float filterQ = 100.0;
+	float filterGain = 10;
+	float lpCutoff = 5000;
+	float micGain = 3.0;
+	float limiterThresh = 0.95;
+	//ms
+	float limiterLookahead  = 0.4;
+	float limiterRelease  = 10.;
 	float baseFrequency = 220;
-	float fbAmount;
+	float fbAmount = 20;
 	float glideAmount = 10;
+	
+	//not being used
+	float filterChannelGain = 1.0;
 	
 	//touch data 
 	int lastTouched = 0;
 	
 	//preset data 
-	int activePreset;
+	int activePreset = 0;
 	
 	//freq display
 	float freqDisplay;
@@ -191,6 +200,7 @@ struct DeviceState {
 
 BufferState gBufferState;
 DeviceState gDeviceState;
+DeviceState gPresets[10];
 
 // int keys[NUM_KEYS] = {8,9,10,11,12,13,14,15,16,17,18,19,20,21};
 //with two broken keys
@@ -255,8 +265,10 @@ int gModeButtonLastStatus = 0; // Last status of oscillator selection button
 
 //biquad filtering
 std::vector<Biquad> filterBank(NUM_OSCS);
+Biquad lpfilter;
 
 Biquad::Settings s;
+Biquad::Settings lps;
 
 float gTimePeriod = 0.1;
 
