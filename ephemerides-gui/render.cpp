@@ -23,6 +23,24 @@ void storePreset(DeviceState currentState, int index) {
 	}
 }
 
+//daisy generated
+void sendRmsBuffer(void*) {
+    if(!gRmsReady.load()) return;
+
+    // Pack [timestamp, ch0...ch31] into one buffer
+    float outBuffer[9];
+    outBuffer[0] = gTimestampMs;
+    memcpy(&outBuffer[1], gRmsResults, NUM_OSCS * sizeof(float));
+
+    gui.sendBuffer(0, outBuffer, 9);
+
+    // Send recording state
+    float recState = gIsRecording.load() ? 1.0f : 0.0f;
+    gui.sendBuffer(1, &recState, 1);
+
+    gRmsReady.store(false);
+}
+
 DeviceState recallPreset(int index) {
 	return gPresets[index];
 }
@@ -132,6 +150,9 @@ void loop(void*)
 				case 5:
 					gDeviceState.micGain = gBufferState.potValue*10.;
 					break;
+				case 6:
+					//unassigned
+					break;
 				case 7:
 					gDeviceState.limiterThresh = gBufferState.potValue * 3 + 0.8;
 					break;
@@ -149,6 +170,12 @@ void loop(void*)
 					break;
 				case 12:
 					gDeviceState.glideAmount = gBufferState.potValue * 1000.;
+					break;
+				case 13:
+					//envelope
+					break;
+				case 14:
+					//envelope
 					break;
 				case 15:
 					gDeviceState.panning[gDeviceState.lastTouched] = gBufferState.potValue;
@@ -266,6 +293,13 @@ bool setup(BelaContext *context, void *userData)
 	gui.setBuffer('f', 1);
 	gui.setBuffer('f', 1);
 	
+	//RMS buffers 
+    gui.setBuffer('f', 9);   // Buffer 0 - RMS data
+    gui.setBuffer('f', 1);    // Buffer 1 - isRecording
+    gui.setBuffer('f', 1);    // Buffer 2 - GUI record button
+
+	// IN SAMPLES
+    gWindowSize = (int)((RMS_INTERVAL_MS / 1000.0f) * context->audioSampleRate);
 
 	//setup filter settings
 	s.fs = context->audioSampleRate;
@@ -382,8 +416,11 @@ void render(BelaContext *context, void *userData)
 		//	filterChannels[i] *= (i * gDeviceState.hiFreqBoost) + 1;
 			filterChannels[i] = inputLimiter.processSample(filterChannels[i]);
 			
+			//RMS capture
+			//gSumOfSquares[ch] += sample * sample;
+			
 			if(gFeedbackOn) {
-				feedback += filterChannels[i] * gDeviceState.fbAmount;
+				feedback += filterChannels[i] * gDeviceState.fbAmount * ((i * gDeviceState.hiFreqBoost) + 1.f);
 			} else {
 				//just mic
 				feedback += input / ((float) NUM_OSCS);

@@ -13,6 +13,7 @@
 #include <libraries/Scope/Scope.h>
 #include <lookahead.h>
 #include <libraries/math_neon/math_neon.h>
+#include <atomic>
 
 
 
@@ -21,6 +22,8 @@
 #define NUM_KEYS 12
 #define analogBaseFreq 0 
 #define analogAmplitude 1
+#define RMS_INTERVAL_MS 50
+#define RECORD_BUTTON_CHANNEL 0  // which analog input the button is on
 
 
 //UTILITY GLOBALS
@@ -172,9 +175,6 @@ struct DeviceState {
 	float fbAmount = 20;
 	float glideAmount = 10;
 	
-	//not being used
-	float filterChannelGain = 1.0;
-	
 	//touch data 
 	int lastTouched = 0;
 	
@@ -273,6 +273,24 @@ Biquad::Settings lps;
 float gTimePeriod = 0.1;
 
 bool gNewData = false;
+
+
+///// RMS capture
+float gSumOfSquares[NUM_OSCS] = {0};
+int gSampleCount = 0;
+int gWindowSize = 0; 
+
+// ---- Shared between audio thread and aux task ----
+float gRmsResults[NUM_OSCS] = {0};   // latest computed RMS values
+float gTimestampMs = 0.0f;               // elapsed ms at time of capture
+std::atomic<bool> gRmsReady{false};      // lock-free handoff flag
+
+// ---- Recording state ----
+std::atomic<bool> gIsRecording{false};
+float gRecordStartMs = 0.0f;             // Bela time when record started
+bool gLastButtonState = false;           // for debounce
+int gDebounceCounter = 0;
+#define DEBOUNCE_FRAMES 100              // ~2ms at 44100Hz
 
 
 

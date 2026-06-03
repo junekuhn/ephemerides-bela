@@ -31,12 +31,31 @@ let channelGains = [0.5, 0.2, 0.99,0.3, 0.2, 0.4, 0.2, 0.2, 0.3];
 let config;
 let leftMeter, rightMeter, leftGain, rightGain;
 let labels = {
-  pots: ["Synth Gain", "High Frequency Boost", "Filter Q", "Filter Gain", "Lowpass Cutoff", "Mic Gain", "Filter Channel Gain", "Limiter Threshold", "Limiter Lookahead", "Limiter Release", "Reference Frequency", "Feedback Amount", "Glide", "Synth Attack", "Synth Release", "Panning"],
+  pots: ["Synth Gain", "High Frequency Boost", "Filter Q", "Filter Gain", "Lowpass Cutoff", "Mic Gain", "Unassigned", "Limiter Threshold", "Limiter Lookahead", "Limiter Release", "Reference Frequency", "Feedback Amount", "Glide", "Unassigned", "Unassigned", "Panning"],
   presetButtons: [],
   big: ["Save Preset", "Set Reference", "Output Toggle", "Drone Mode"],
   freq: ["Mic Input", "Keyboard Input", "Last Selected"],
   register: ["Numerator", "Denominator", "Divisor", "Index", "Algorithm"]
 }
+let presetArray;
+
+//RMS globals 
+const MAX_CHANNELS = 32;
+const BUFFER_RMS   = 0;   // Bela → Browser: [timestamp, ch0...ch31]
+const BUFFER_REC   = 1;   // Bela → Browser: isRecording
+const BUFFER_GUI   = 2;   // Browser → Bela: GUI record toggle
+
+// ---- Recording state ----
+let isRecording    = false;
+let logData        = [];   // accumulated JSON entries
+
+// ---- GUI elements ----
+let recordButton;
+let downloadButton;
+let statusText;
+let channelMeters = [];    // visual RMS meters per channel
+
+
 
 
 
@@ -50,6 +69,8 @@ function setup() {
   backgroundColor = color(255, 255, 255);
   
   outerArc = new arcTouch(0,0,300,300, numPoints);
+  
+  presetArray = new Array.fill(new Preset(), 9);
   
   let potCoords = [
       createVector(-2, -7),
@@ -162,6 +183,64 @@ function draw() {
   
 
   
+}
+
+class Preset = {
+	
+	constructor() {
+		this.index = 0;
+		this.freqDisplay = 0;
+		this.sliderPositions = [
+		0.5, // synthGain
+		0,  //hiFreqBoost
+		0.5, //filterQ
+		0.5, //filterGain
+		0, //lpCutoff
+		0, //micGain
+		0, //Unassigned
+		0, //limiterThresh
+		0, //limiterLookahead
+		0, //limiterRelease
+		0, //reference 
+		0, //fbAmount
+		0, //glideAmount
+		0, //Unassigned
+		0, //Unassigned
+		0.5 //panning
+		];
+		
+		this.registerPositions = [
+			2, //Numerator
+			1, //Denominator
+			4, // Divisor
+			0, // offset
+			0 //Algorithm
+			];
+		
+		this.oscillatorsOn = [false, false, false, false, false, false, false, false];
+		this.panning = [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5];
+		
+	}
+	
+	save () {
+		
+	}
+	
+	load () {
+		//send to bela 
+		
+	}
+	
+	toJSON () {
+		return {
+			index: this.index,
+			sliderPositions: this.sliderPositions,
+			registerPositions: this.registerPositions,
+			oscillatorsOn: this.oscillatorsOn,
+			panning: this.panning,
+			freqDisplay: this.freqDisplay
+		}	
+	}
 }
 
 
@@ -418,6 +497,25 @@ function updateArc(e) {
 
 function updateBig(e) {
   let index = e.target.value;
+  
+  // if save preset
+  if(index == 2) {
+  	e.preventDefault();
+	// should be filled if unsaved, and different from default
+	// should be empty if once saved 
+	
+	// if filled then update and save and 
+	if (e.target.checked) {
+		// get current preset 
+		//save everything to that preset
+	} 
+	// if unfilled do nothing
+	else {
+		return;
+	}
+	
+	return;
+  }
   bigButtons.state.colors[index] = color(e.target.checked ? 255:0, 0, 0);
   
   bigButtons.state.mask = updateBitmask(bigButtons.state.mask, index, e.target.checked);
@@ -473,8 +571,8 @@ function updateFreq(e) {
 }
 
 function updatePreset(e) {
-	//value from 1 to 12
-	Bela.data.sendBuffer(1, 'float', [e.target.value]);
+	
+
 }
 
 function updatePot(e) {
@@ -507,3 +605,66 @@ function sendInit() {
 	
 	
 }
+
+
+// Load bubble data from JSON file
+function loadPresets(file) {
+  //loadData(file.data);
+}
+
+// Download bubble data as JSON file
+function downloadPresets() {
+  //save(bubbles, 'bubbles.json');
+  
+  //loop through all presets and store as JSON 
+  //save to file 
+}
+
+
+//RMS handlers 
+function onRecordButtonPressed() {
+    let newState = !isRecording;
+
+    // Send toggle to Bela
+    Bela.data.sendBuffer(BUFFER_GUI, 'float', [newState ? 1.0 : 0.0]);
+
+    setRecordingState(newState);
+}
+
+function setRecordingState(state) {
+    isRecording = state;
+
+    if(isRecording) {
+        logData = [];   // clear previous recording
+        recordButton.html('Stop');
+        statusText.html('● Recording...');
+        statusText.style('color', 'red');
+        downloadButton.attribute('disabled', '');
+    } else {
+        recordButton.html('Record');
+        statusText.html('Stopped');
+        statusText.style('color', 'black');
+
+        // Only enable download if we have data
+        if(logData.length > 0)
+            downloadButton.removeAttribute('disabled');
+    }
+}
+
+function onDownloadPressed() {
+    if(logData.length === 0) return;
+
+    let json     = JSON.stringify(logData, null, 2);
+    let blob     = new Blob([json], { type: 'application/json' });
+    let url      = URL.createObjectURL(blob);
+    let a        = document.createElement('a');
+    a.href       = url;
+    a.download   = `rms_recording_${Date.now()}.json`;
+    a.click();
+
+    // Clean up blob URL after download
+    URL.revokeObjectURL(url);
+}
+
+
+
