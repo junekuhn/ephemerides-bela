@@ -17,11 +17,11 @@ int displaceIndex(int key) {
 	return key - c;
 }
 
-void storePreset(DeviceState currentState, int index) {
-	if(index < 10 && index >= 0) {
-		gPresets[index] = currentState;
-	}
-}
+// void storePreset(DeviceState currentState, int index) {
+// 	if(index < 10 && index >= 0) {
+// 		gPresets[index] = currentState;
+// 	}
+// }
 
 //daisy generated
 void sendRmsBuffer(void*) {
@@ -32,28 +32,24 @@ void sendRmsBuffer(void*) {
     outBuffer[0] = gTimestampMs;
     memcpy(&outBuffer[1], gRmsResults, NUM_OSCS * sizeof(float));
 
-    gui.sendBuffer(0, outBuffer, 9);
-
-    // Send recording state
-    float recState = gIsRecording.load() ? 1.0f : 0.0f;
-    gui.sendBuffer(1, &recState, 1);
+    gui.sendBuffer(7, outBuffer, 9);
 
     gRmsReady.store(false);
 }
 
-DeviceState recallPreset(int index) {
-	return gPresets[index];
-}
+// DeviceState recallPreset(int index) {
+// 	return gPresets[index];
+// }
 
 void printTask(float myFloat) {
-    if(!gNewData) return;
+ //   if(!gNewData) return;
 
     rt_printf("=== DeviceState ===\n");
 
     rt_printf("div, n, d:\n");
-    rt_printf("%f \n", myFloat);
+    rt_printf("%f \n", gDeviceState.recButton.load());
 
-    gNewData = false;
+  //  gNewData = false;
    	usleep(5000);
 }
 
@@ -94,10 +90,7 @@ void loop(void*)
 		DataBuffer& registerBuf = gui.getDataBuffer(3);
 		DataBuffer& bigBuf = gui.getDataBuffer(4);
 		DataBuffer& freqBuf = gui.getDataBuffer(5);
-		
-		// Retrieve contents of the buffer as floats
-			//store in struct 
-		unsigned int blength = touchBuf.getNumElements();
+		DataBuffer& recBuf = gui.getDataBuffer(6);
 		
 		if(touchBuf.getNumElements()>0){
 			float* touchData = touchBuf.getAsFloat();
@@ -184,7 +177,7 @@ void loop(void*)
 					break;
 			}
 			
-			printTask(gBufferState.potValue);
+		//	printTask(gBufferState.potValue);
 			
 			//reset buffer
 		    potsBuf.getBuffer()->resize(0);
@@ -194,7 +187,7 @@ void loop(void*)
 		if(presetBuf.getNumElements()>0){
 			gBufferState.activePreset = (int) presetBuf.getAsFloat()[0];
 			
-			gDeviceState = recallPreset(gBufferState.activePreset);
+	//		gDeviceState = recallPreset(gBufferState.activePreset);
 						
 			//reset buffer
 		    presetBuf.getBuffer()->resize(0);
@@ -245,11 +238,12 @@ void loop(void*)
 	    	
 	    	
 	    	if(gDeviceState.savePresetButton) {
-	    		storePreset(gDeviceState, gDeviceState.activePreset);
+	    	//	storePreset(gDeviceState, gDeviceState.activePreset);
 	    		gDeviceState.savePresetButton = false;
 	    	}
 	    	
-	    	
+	    	rt_printf("toggle out \n");
+	    	rt_printf("%d", gDeviceState.toggleOutputButton);
 	    	
 	    	//reset buffer
 		    bigBuf.getBuffer()->resize(0);
@@ -266,6 +260,14 @@ void loop(void*)
 	    	//reset buffer
 		    freqBuf.getBuffer()->resize(0);
 		    gNeedsUpdate = true;
+		}
+		
+		if(recBuf.getNumElements()>0) {
+			float* recData = recBuf.getAsFloat();
+			//true if 1, false if 0
+			gDeviceState.recButton.store((bool) (recData[0] > 0.5));
+			
+			recBuf.getBuffer()->resize(0);
 		}
 
 	
@@ -293,13 +295,22 @@ bool setup(BelaContext *context, void *userData)
 	gui.setBuffer('f', 1);
 	gui.setBuffer('f', 1);
 	
+	gui.setBuffer('f', 1); // rcv recording state from gui (6)
+	
 	//RMS buffers 
-    gui.setBuffer('f', 9);   // Buffer 0 - RMS data
-    gui.setBuffer('f', 1);    // Buffer 1 - isRecording
-    gui.setBuffer('f', 1);    // Buffer 2 - GUI record button
+     gui.setBuffer('f', 9);  // rms values (7)
+   // gui.setBuffer('f', 1);    // Buffer 1 - isRecording
+   // gui.setBuffer('f', 1);    // Buffer 2 - GUI record button
 
 	// IN SAMPLES
     gWindowSize = (int)((RMS_INTERVAL_MS / 1000.0f) * context->audioSampleRate);
+    
+    //task that automatically goes every 50 ms
+    sendTask = Bela_createAuxiliaryTask(sendRmsBuffer, 50, "rms-send-task");
+    if(!sendTask) {
+        rt_printf("Error creating send task\n");
+        return false;
+    }
 
 	//setup filter settings
 	s.fs = context->audioSampleRate;
@@ -367,6 +378,8 @@ void render(BelaContext *context, void *userData)
 		
 	    //count will increase at each audio frame by one
 		count++;
+		gSampleCount++;
+		
 		
 	//	float out = 0;
 		float outArray[context->audioOutChannels];
@@ -417,7 +430,7 @@ void render(BelaContext *context, void *userData)
 			filterChannels[i] = inputLimiter.processSample(filterChannels[i]);
 			
 			//RMS capture
-			//gSumOfSquares[ch] += sample * sample;
+			gSumOfSquares[i] += filterChannels[i]*filterChannels[i];
 			
 			if(gFeedbackOn) {
 				feedback += filterChannels[i] * gDeviceState.fbAmount * ((i * gDeviceState.hiFreqBoost) + 1.f);
@@ -524,6 +537,31 @@ void render(BelaContext *context, void *userData)
 
 			//and we reset the counter
 			count = 0;
+		}
+		
+		//send to gui every 50 ms 
+		if(gSampleCount >= gWindowSize) {
+			
+			
+			if(gDeviceState.recButton.load() && !gRmsReady.load()) {
+                // Compute RMS per channel
+                for(int ch = 0; ch < NUM_OSCS; ch++) {
+                        gRmsResults[ch] = sqrtf(gSumOfSquares[ch] / gWindowSize);
+                }
+
+                // Compute elapsed ms from record start using audio clock
+                float elapsedSamples = (float)context->audioFramesElapsed + n;
+                gTimestampMs = ((elapsedSamples / context->audioSampleRate) * 1000.0f)
+                               - gRecordStartMs;
+
+                // Signal aux task
+                gRmsReady.store(true);
+                Bela_scheduleAuxiliaryTask(sendTask);
+            }
+
+            // Reset accumulation regardless of recording state
+            memset(gSumOfSquares, 0, sizeof(gSumOfSquares));
+            gSampleCount = 0;
 		}
 	}
 	

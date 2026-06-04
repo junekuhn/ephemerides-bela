@@ -25,6 +25,8 @@
 #define RMS_INTERVAL_MS 50
 #define RECORD_BUTTON_CHANNEL 0  // which analog input the button is on
 
+#define SENDBUF 0
+
 
 //UTILITY GLOBALS
 bool gMicOn = true;
@@ -47,6 +49,7 @@ Limiter outputLimiter;
 //Trill touchSensor;
 Pipe gPipe;
 Gui gui;
+AuxiliaryTask sendTask;
 
 //scope
 float gOutput[NUM_OSCS];
@@ -159,6 +162,7 @@ struct DeviceState {
 	bool setReferenceButton;
 	bool toggleOutputButton = false;
 	bool droneModeButton;
+	std::atomic<bool> recButton{false};
 	
 	//potentiometers
 	float synthGain = 0.5;
@@ -286,7 +290,7 @@ float gTimestampMs = 0.0f;               // elapsed ms at time of capture
 std::atomic<bool> gRmsReady{false};      // lock-free handoff flag
 
 // ---- Recording state ----
-std::atomic<bool> gIsRecording{false};
+
 float gRecordStartMs = 0.0f;             // Bela time when record started
 bool gLastButtonState = false;           // for debounce
 int gDebounceCounter = 0;

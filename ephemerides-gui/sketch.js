@@ -27,7 +27,7 @@ let numPoints = 16;
 let pots, presetButtons, bigButtons, freqButtons, registerButtons;
 let meters;
 let segmentDisplay;
-let channelGains = [0.5, 0.2, 0.99,0.3, 0.2, 0.4, 0.2, 0.2, 0.3];
+let channelGains = [0.5, 0.2, 0.99,0.3, 0.2, 0.4, 0.2, 0.2];
 let config;
 let leftMeter, rightMeter, leftGain, rightGain;
 let labels = {
@@ -37,13 +37,23 @@ let labels = {
   freq: ["Mic Input", "Keyboard Input", "Last Selected"],
   register: ["Numerator", "Denominator", "Divisor", "Index", "Algorithm"]
 }
-let presetArray;
+let presetArray = [];
 
-//RMS globals 
-const MAX_CHANNELS = 32;
-const BUFFER_RMS   = 0;   // Bela → Browser: [timestamp, ch0...ch31]
-const BUFFER_REC   = 1;   // Bela → Browser: isRecording
-const BUFFER_GUI   = 2;   // Browser → Bela: GUI record toggle
+// send buffers
+const MAX_CHANNELS = 8;
+const BUFFER_POT = 0;
+const BUFFER_PRESET = 1;
+const BUFFER_TOUCH = 2;
+const BUFFER_REGISTER = 3;
+const BUFFER_BIG = 4;
+const BUFFER_FREQ = 5;
+const BUFFER_REC_SEND = 6;  
+
+//receive buffers
+const BUFFER_RMS = 7;   
+const BUFFER_LEFT = 8;
+const BUFFER_RIGHT = 9;
+ 
 
 // ---- Recording state ----
 let isRecording    = false;
@@ -70,7 +80,7 @@ function setup() {
   
   outerArc = new arcTouch(0,0,300,300, numPoints);
   
-  presetArray = new Array.fill(new Preset(), 9);
+  presetArray.fill(new Preset(), 9);
   
   let potCoords = [
       createVector(-2, -7),
@@ -135,6 +145,16 @@ function setup() {
   leftMeter = new Meter(-1*12, 8*12, 12, 60, 8);
   rightMeter = new Meter(12, 8*12, 12, 60, 8);
   
+  
+    recordButton = createButton('Record');
+    recordButton.position(width, height);
+    recordButton.mousePressed(onRecordButtonPressed);
+
+    downloadButton = createButton('Download JSON');
+    downloadButton.position(width-150, height);
+    downloadButton.attribute('disabled', '');
+    downloadButton.mousePressed(onDownloadPressed);
+  
   //send initial values
   sendInit()
   
@@ -162,14 +182,14 @@ function draw() {
   registerButtons.drawShapes();
   
   //pull first two buffers to meters
-  leftMeter.drawShapes(Bela.data.buffers[0]);
-  rightMeter.drawShapes(Bela.data.buffers[1]);
+  leftMeter.drawShapes(Bela.data.buffers[BUFFER_LEFT]);
+  rightMeter.drawShapes(Bela.data.buffers[BUFFER_RIGHT]);
   
   fill(0,255,0);
   rectMode(CORNER)
   channelGains.map((channelGain, index) => {
     let channelSpacing = 300 / channelGains.length;
-    rect(width/4 + index*channelSpacing, height*0.4, channelSpacing-4, -60*channelGain )
+    rect(width/4 + index*channelSpacing, height*0.4, channelSpacing-4, -60*channelGain*100 )
   })
   rectMode(CENTER)
   
@@ -182,10 +202,41 @@ function draw() {
   text("1 0. 3 0 4", 6*12, 4*12 );
   
 
+    // ---- Read incoming RMS buffer ----
+    let rmsBuf = Bela.data.buffers[BUFFER_RMS];
+   // console.log(rmsBuf ? rmsBuf[0] : "nothing");
+    if(rmsBuf && rmsBuf.length == MAX_CHANNELS + 1) {
+        let timestamp = rmsBuf[0];
+        let rms       = Array.from(rmsBuf.slice(1, 9));
+        
+   //     console.log(rmsBuf.length);
+
+
+        // Update meters regardless of recording state
+        for(let i = 0; i < MAX_CHANNELS; i++)
+            channelGains[i] = rms[i];
+            
+            
+  //     console.log(channelGains[2], channelGains[0]);
+
+        // Only log if recording
+        if(isRecording) {
+            logData.push({
+                t:   Math.round(timestamp),
+                rms: rms.map(v => parseFloat(v.toFixed(4)))
+            });
+        }
+    }
+    
+        // Status text
+    statusText = createP('Stopped');
+    statusText.position(240, 14);
+  
+
   
 }
 
-class Preset = {
+class Preset {
 	
 	constructor() {
 		this.index = 0;
@@ -462,9 +513,9 @@ function updateArc(e) {
 		}
 		
 		//send register to bela
-		Bela.data.sendBuffer(3, 'float', [outerArc.registerIndex, e.target.value]);
+		Bela.data.sendBuffer(BUFFER_REGISTER, 'float', [outerArc.registerIndex, e.target.value]);
 		
-		console.log([outerArc.registerIndex, e.target.value])
+	//	console.log([outerArc.registerIndex, e.target.value])
 		
 		outerArc.registerOn = false;
 		
@@ -492,14 +543,15 @@ function updateArc(e) {
    
     
     //send to bela 
-    Bela.data.sendBuffer(2, 'float', touchBufferArray);
+    Bela.data.sendBuffer(BUFFER_TOUCH, 'float', touchBufferArray);
 }
 
 function updateBig(e) {
   let index = e.target.value;
   
+  
   // if save preset
-  if(index == 2) {
+  if(index == 0) {
   	e.preventDefault();
 	// should be filled if unsaved, and different from default
 	// should be empty if once saved 
@@ -519,8 +571,9 @@ function updateBig(e) {
   bigButtons.state.colors[index] = color(e.target.checked ? 255:0, 0, 0);
   
   bigButtons.state.mask = updateBitmask(bigButtons.state.mask, index, e.target.checked);
+
   
-  Bela.data.sendBuffer(4, 'float', bigButtons.state.mask)
+  Bela.data.sendBuffer(BUFFER_BIG, 'float', bigButtons.state.mask)
 }
 
 function updateRegister(e) {
@@ -567,7 +620,7 @@ function updateFreq(e) {
   
   freqButtons.state.mask = updateBitmask(freqButtons.state.mask, index, e.target.checked);
   
-  Bela.data.sendBuffer(5, 'float', freqButtons.state.mask)
+  Bela.data.sendBuffer(BUFFER_FREQ, 'float', freqButtons.state.mask)
 }
 
 function updatePreset(e) {
@@ -580,7 +633,7 @@ function updatePot(e) {
 	let potvalue = e.target.value;
 	let potindex = e.target.getAttribute("data-index");
 
-	Bela.data.sendBuffer(0, 'float', [potindex, potvalue]);
+	Bela.data.sendBuffer(BUFFER_POT, 'float', [potindex, potvalue]);
 }
 
 // Set or clear a bit by index and boolean value
@@ -624,9 +677,11 @@ function downloadPresets() {
 //RMS handlers 
 function onRecordButtonPressed() {
     let newState = !isRecording;
+    
+    console.log(newState);
 
-    // Send toggle to Bela
-    Bela.data.sendBuffer(BUFFER_GUI, 'float', [newState ? 1.0 : 0.0]);
+    // Send toggle to Bela (convert to float)
+    Bela.data.sendBuffer(BUFFER_REC_SEND, 'float', [newState ? 1.0 : 0.0]);
 
     setRecordingState(newState);
 }
@@ -637,7 +692,7 @@ function setRecordingState(state) {
     if(isRecording) {
         logData = [];   // clear previous recording
         recordButton.html('Stop');
-        statusText.html('● Recording...');
+        statusText.html('Recording...');
         statusText.style('color', 'red');
         downloadButton.attribute('disabled', '');
     } else {
