@@ -9,7 +9,7 @@ buffer structure
 | ------------- | ------------------ | ---- | -------------------------------- |
 | 0             | pot values         | 2    | index and value floats           |
 | 1             | preset index       | 1    | float                            |
-| 2             | 32 touch values    | 2    | float and index                            |
+| 2             | 32 touch values    | 3    | float and index and panning                            |
 | 3             | register keys      | 2    | index and value floats           |
 | 4             | big buttons.       | 1    | float(bitmask)                   |
 | 5             | freq buttons       | 1    | float(bitmask)                   |
@@ -37,7 +37,6 @@ let labels = {
   freq: ["Mic Input", "Keyboard Input", "Last Selected"],
   register: ["Numerator", "Denominator", "Divisor", "Index", "Algorithm"]
 }
-let presetArray = [];
 
 // send buffers
 const MAX_CHANNELS = 8;
@@ -53,6 +52,7 @@ const BUFFER_REC_SEND = 6;
 const BUFFER_RMS = 7;   
 const BUFFER_LEFT = 8;
 const BUFFER_RIGHT = 9;
+const BUFFER_PANNING = 10;
  
 
 // ---- Recording state ----
@@ -65,10 +65,9 @@ let downloadButton;
 let statusText;
 let channelMeters = [];    // visual RMS meters per channel
 
-
-
-
-
+//presets 
+let presetManager;
+let fileInput;
 
 function setup() {
   createCanvas(800, 500);
@@ -80,7 +79,20 @@ function setup() {
   
   outerArc = new arcTouch(0,0,300,300, numPoints);
   
-  presetArray.fill(new Preset(), 9);
+  presetManager = new PresetManager(9);
+  
+	  // Download bank
+	let downloadButton = createButton('Download Bank');
+	downloadButton.position(width-300, height);
+	downloadButton.mousePressed(() => presetManager.downloadBank());
+	
+	let uploadButton = createButton('Upload Presets');
+	uploadButton.position(width-450, height);
+	uploadButton.mousePressed(() => {
+	    fileInput = createFileInput((file) => {
+	        presetManager.loadBankFromFile(file.file);
+	    });
+	})
   
   let potCoords = [
       createVector(-2, -7),
@@ -111,10 +123,7 @@ function setup() {
     createVector(-5, 4),
     createVector(-8, 6),
     createVector(-6, 6),
-    createVector(-4, 6),
-    createVector(-7, 8),
-    createVector(-5, 8),
-    createVector(-3, 8)
+    createVector(-4, 6)
   ];
   presetButtons = new buttonArray(presetCoords, presetCoords.length, 12,12, type="PRESET");
   
@@ -158,15 +167,12 @@ function setup() {
   //send initial values
   sendInit()
   
-  
 }
 
 function draw() {
   background(backgroundColor);
   translate(width/4, height/2);
   
-
-
   noFill();
   stroke(0);
   textSize(25);
@@ -204,20 +210,13 @@ function draw() {
 
     // ---- Read incoming RMS buffer ----
     let rmsBuf = Bela.data.buffers[BUFFER_RMS];
-   // console.log(rmsBuf ? rmsBuf[0] : "nothing");
     if(rmsBuf && rmsBuf.length == MAX_CHANNELS + 1) {
         let timestamp = rmsBuf[0];
         let rms       = Array.from(rmsBuf.slice(1, 9));
         
-   //     console.log(rmsBuf.length);
-
-
         // Update meters regardless of recording state
         for(let i = 0; i < MAX_CHANNELS; i++)
             channelGains[i] = rms[i];
-            
-            
-  //     console.log(channelGains[2], channelGains[0]);
 
         // Only log if recording
         if(isRecording) {
@@ -231,67 +230,181 @@ function draw() {
         // Status text
     statusText = createP('Stopped');
     statusText.position(240, 14);
-  
-
-  
+ 
 }
 
 class Preset {
-	
-	constructor() {
-		this.index = 0;
-		this.freqDisplay = 0;
-		this.sliderPositions = [
-		0.5, // synthGain
-		0,  //hiFreqBoost
-		0.5, //filterQ
-		0.5, //filterGain
-		0, //lpCutoff
-		0, //micGain
-		0, //Unassigned
-		0, //limiterThresh
-		0, //limiterLookahead
-		0, //limiterRelease
-		0, //reference 
-		0, //fbAmount
-		0, //glideAmount
-		0, //Unassigned
-		0, //Unassigned
-		0.5 //panning
-		];
-		
-		this.registerPositions = [
-			2, //Numerator
-			1, //Denominator
-			4, // Divisor
-			0, // offset
-			0 //Algorithm
-			];
-		
-		this.oscillatorsOn = [false, false, false, false, false, false, false, false];
-		this.panning = [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5];
-		
-	}
-	
-	save () {
-		
-	}
-	
-	load () {
-		//send to bela 
-		
-	}
-	
-	toJSON () {
-		return {
-			index: this.index,
-			sliderPositions: this.sliderPositions,
-			registerPositions: this.registerPositions,
-			oscillatorsOn: this.oscillatorsOn,
-			panning: this.panning,
-			freqDisplay: this.freqDisplay
-		}	
-	}
+
+    constructor() {
+        this.index = 0;
+        this.sliderPositions = [
+            0.5, // synthGain
+            0,   // hiFreqBoost
+            0.5, // filterQ
+            0.5, // filterGain
+            0,   // lpCutoff
+            0,   // micGain
+            0,   // Unassigned
+            0,   // limiterThresh
+            0,   // limiterLookahead
+            0,   // limiterRelease
+            0,   // reference
+            0,   // fbAmount
+            0,   // glideAmount
+            0,   // Unassigned
+            0,   // Unassigned
+            0.5  // panning
+        ];
+
+        this.registerPositions = [
+            2, // Numerator
+            1, // Denominator
+            4, // Divisor
+            0, // offset
+            0  // Algorithm
+        ];
+
+        this.oscillatorsOn = [false, false, false, false, false, false, false, false];
+        this.panning       = [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5];
+    }
+
+    toJSON(data = {sliders: this.sliderPositions, registers: this.registerPositions, oscs: this.oscillatorsOn, panning: this.panning }) {
+    	
+    	console.log(data.sliders)
+    	
+    	//pull state first and store here 
+    	this.sliderPositions = [...data.sliders];
+    	this.registerPositions = [...data.registers];
+    	this.oscillatorsOn = [...data.oscs];
+    	this.panning = [...data.panning];
+    	
+        return {
+            index:             this.index,
+            sliderPositions:   [...this.sliderPositions],   
+            registerPositions: [...this.registerPositions],
+            oscillatorsOn:     [...this.oscillatorsOn],
+            panning:           [...this.panning]
+        };
+    }
+
+    fromJSON(data) {
+        this.index             = data.index             ?? this.index;
+        this.sliderPositions   = data.sliderPositions   ?? [...this.sliderPositions];
+        this.registerPositions = data.registerPositions ?? [...this.registerPositions];
+        this.oscillatorsOn     = data.oscillatorsOn     ?? [...this.oscillatorsOn];
+        this.panning           = data.panning           ?? [...this.panning];
+        
+        //load into state 
+        loadPresetToState(this);
+        
+        return this;
+    }
+
+    // ---- Load from a JSON object and send all parameters to Bela ----
+    load(data) {
+        // Populate fields from JSON
+        this.fromJSON(data);
+
+        // Send each parameter group to Bela via matching buffer IDs
+        this._sendPots();
+        this._sendRegisters();
+        this._sendOscillators();
+
+        console.log(`Preset ${this.index} loaded`);
+    }
+
+    // ---- Private send helpers ----
+
+    _sendPots() {
+        // Send all slider positions - Bela will handle soft takeover
+        // Buffer 6: [potIndex, potValue] pairs sent sequentially
+        this.sliderPositions.map((val, i) => {
+            Bela.data.sendBuffer(BUFFER_POT, 'float', [parseFloat(i), parseFloat(val)]);
+        });
+    }
+
+    _sendRegisters() {
+		this.registerPositions.map((val, i) => {
+    		Bela.data.sendBuffer(BUFFER_REGISTER, 'float', [parseFloat(i), parseFloat(val)]);			
+		});
+    }
+
+    _sendOscillators() {
+        let oscFloats = this.oscillatorsOn.map(v => v ? 1.0 : 0.0);
+        oscFloats.map((val, i) => {
+			Bela.data.sendBuffer(BUFFER_TOUCH, 'float', [parseFloat(i), oscFloats[i], parseFloat(this.panning[i])]);
+        })
+    }
+}
+
+class PresetManager {
+
+    constructor(bankSize = 9) {
+        this.bankSize      = bankSize;
+        this.currentIndex  = 0;
+        this.bank          = Array.from({ length: bankSize }, (_, i) => {
+            let p = new Preset();
+            p.index = i;
+            return p.toJSON();  // initialise bank with defaults
+        });
+        this.current = new Preset();
+    }
+
+    loadPreset(index) {
+        if(index < 0 || index >= this.bankSize) return;
+        this.currentIndex = index;
+        this.current.load(this.bank[index]);
+    }
+
+    // ---- Save current state into bank slot ----
+    savePreset(data) {
+        this.current.index = this.currentIndex;
+        this.bank[this.currentIndex] = this.current.toJSON(data);
+        console.log(`Saved to slot ${this.currentIndex}`);
+    }
+
+    // ---- Download entire bank as JSON ----
+    downloadBank() {
+        let json = JSON.stringify({ presets: this.bank }, null, 2);
+        let blob = new Blob([json], { type: 'application/json' });
+        let url  = URL.createObjectURL(blob);
+        let a    = document.createElement('a');
+        a.href     = url;
+        a.download = `preset_bank_${Date.now()}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+    }
+
+    // ---- Load bank from JSON file via file input element ----
+    loadBankFromFile(file) {
+        let reader = new FileReader();
+
+        reader.onload = (e) => {
+            try {
+                let data = JSON.parse(e.target.result);
+
+                if(!data.presets || !Array.isArray(data.presets)) {
+                    console.error('Invalid preset bank file');
+                    return;
+                }
+
+                // Merge loaded presets into bank
+                // ?? fallback keeps existing slot if file is missing that index
+                data.presets.forEach((p, i) => {
+                    if(i < this.bankSize) this.bank[i] = p;
+                });
+
+                // Reload current preset from updated bank
+                this.loadPreset(this.currentIndex);
+                console.log(`Bank loaded: ${data.presets.length} presets`);
+
+            } catch(e) {
+                console.error('Failed to parse preset file:', e);
+            }
+        };
+
+        reader.readAsText(file);
+    }
 }
 
 
@@ -306,7 +419,9 @@ class arcTouch {
       colors: [],
       // this contains both index and value
       touched: new Array(32).fill(false),
-      elements: []
+      elements: [],
+      panning: new Array(32).fill(0.5),
+      lastTouched: 0
     }
     this.maxTouchPoints = 4;
     this.init();
@@ -328,10 +443,6 @@ class arcTouch {
     }
   }
   
-  update(e) {
-
-  }
-  
   drawShapes() {
     
     textSize(10);
@@ -344,9 +455,6 @@ class arcTouch {
     stroke(backgroundColor);
     strokeWeight(1);
     let angleInc = Math.PI/this.numPoints;
-    
-
-    
     
     for(let point = 0; point<this.numPoints; point++) {
       
@@ -362,9 +470,7 @@ class arcTouch {
     arc(this.x, this.y, this.w*0.7, this.h*0.7, angle, nextAngle, PIE);
       
     }
- 
   }
-  
 }
 
 class buttonArray {
@@ -420,8 +526,6 @@ class buttonArray {
           this.state.elements[0].size(100);
           this.state.elements[0].elt.addEventListener("change", updatePreset);
       }
-    
-
   }
   
   drawShapes() {
@@ -515,32 +619,26 @@ function updateArc(e) {
 		//send register to bela
 		Bela.data.sendBuffer(BUFFER_REGISTER, 'float', [outerArc.registerIndex, e.target.value]);
 		
-	//	console.log([outerArc.registerIndex, e.target.value])
-		
 		outerArc.registerOn = false;
 		
 		return;
 		
 	}
-    
-  
-    
-
-    
-    //send register buffer 
+	
+	//fill preset checkbox
+	bigButtons.state.elements[0].elt.checked = true;
+	
     
     
       //go through all points and colors and indicators based on state changes
     let index = e.target.value;
-    
-    
-
+   
     outerArc.state.colors[index] = color(e.target.checked ? 0:255, 0, 0)
     outerArc.state.touched[index] = e.target.checked;
+    outerArc.state.lastTouched = index;
     
     //convert to float array first
-    let touchBufferArray = [parseFloat(index), + outerArc.state.touched[index]];
-   
+    let touchBufferArray = [parseFloat(index), + outerArc.state.touched[index], outerArc.state.panning[index]];
     
     //send to bela 
     Bela.data.sendBuffer(BUFFER_TOUCH, 'float', touchBufferArray);
@@ -549,6 +647,7 @@ function updateArc(e) {
 function updateBig(e) {
   let index = e.target.value;
   
+  console.log(pots.state.values)
   
   // if save preset
   if(index == 0) {
@@ -557,9 +656,19 @@ function updateBig(e) {
 	// should be empty if once saved 
 	
 	// if filled then update and save and 
-	if (e.target.checked) {
+	if (e.target.checked == false) {
 		// get current preset 
 		//save everything to that preset
+		let presetData = {
+			   	//pull state first and store here 
+    	sliders: pots.state.values,
+    	registers: outerArc.registerStates,
+    	oscs: outerArc.state.touched,
+    	panning: outerArc.state.panning
+		}
+		
+		
+		presetManager.savePreset(presetData);
 	} 
 	// if unfilled do nothing
 	else {
@@ -592,12 +701,12 @@ function updateRegister(e) {
   let index = e.target.value;
 
   
-
+	//fill preset checkbox
+	bigButtons.state.elements[0].elt.checked = true;
   
   registerButtons.state.colors[index] = color(e.target.checked ? 255:0, 0, 0);
   registerButtons.state.values[index] = e.target.checked;
-  
-  console.log(index)
+
 	outerArc.registerOn = true;
 	outerArc.registerIndex = index;
   
@@ -632,6 +741,17 @@ function updatePot(e) {
 	// value from 0 255
 	let potvalue = e.target.value;
 	let potindex = e.target.getAttribute("data-index");
+	
+	//fill preset checkbox
+	bigButtons.state.elements[0].elt.checked = true;
+	
+	//update panning to state
+	if(potindex == 15) {
+		// last touched 
+		outerArc.state.panning[outerArc.state.lastTouched] = potvalue;
+	} else {
+		pots.state.values[potindex] = potvalue;
+	}
 
 	Bela.data.sendBuffer(BUFFER_POT, 'float', [potindex, potvalue]);
 }
@@ -657,20 +777,6 @@ function sendInit() {
 	Bela.data.sendBuffer(3, 'float', [2, outerArc.registerStates[2]]);
 	
 	
-}
-
-
-// Load bubble data from JSON file
-function loadPresets(file) {
-  //loadData(file.data);
-}
-
-// Download bubble data as JSON file
-function downloadPresets() {
-  //save(bubbles, 'bubbles.json');
-  
-  //loop through all presets and store as JSON 
-  //save to file 
 }
 
 
@@ -721,5 +827,24 @@ function onDownloadPressed() {
     URL.revokeObjectURL(url);
 }
 
+function loadPresetToState(preset) {
+	outerArc.registerStates = [...preset.registerPositions];
+	
+	preset.sliderPositions.map((value, i) => {
+		pots.state.elements[i].elt.value = value;
+		pots.state.values[i] = value;
+	});
+	
+	preset.oscillatorsOn.map((value, i) => {
+		outerArc.state.elements[i].elt.checked = value;
+		outerArc.state.colors[index] = color(value ? 0:255, 0, 0)
+    	outerArc.state.touched[index] = value;
+    	outerArc.state.panning = preset.panning[i];
+	});
+
+	
+	
+	console.log(`uploaded preset ${preset.index} to state`)
+}
 
 

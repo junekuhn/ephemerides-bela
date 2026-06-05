@@ -96,6 +96,7 @@ void loop(void*)
 			float* touchData = touchBuf.getAsFloat();
 			gBufferState.touchIndex = (int) touchData[0];
 			gBufferState.touchValue =  touchData[1] != 0;
+			gDeviceState.panning[gBufferState.touchIndex] = touchData[2];
 			
 				    	//update noteIndex
         	if(gBufferState.touchIndex < NUM_OSCS) {
@@ -269,7 +270,6 @@ void loop(void*)
 			
 			recBuf.getBuffer()->resize(0);
 		}
-
 	
                 
 		usleep(50000);
@@ -290,7 +290,7 @@ bool setup(BelaContext *context, void *userData)
 	//gui set buffers
 	gui.setBuffer('f', 2);  
 	gui.setBuffer('f', 1);
-	gui.setBuffer('f', 2);
+	gui.setBuffer('f', 3); //index, on/off, panning
 	gui.setBuffer('f', 2);
 	gui.setBuffer('f', 1);
 	gui.setBuffer('f', 1);
