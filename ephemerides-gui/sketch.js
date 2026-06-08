@@ -3,8 +3,7 @@ For sending a buffer from p5.js to Bela we use the function:
 ```
 Bela.data.sendBuffer(0, 'float', buffer);
 
-
-buffer structure
+old buffer structure
 | gui           | to                 | bela |                                  |
 | ------------- | ------------------ | ---- | -------------------------------- |
 | 0             | pot values         | 2    | index and value floats           |
@@ -13,6 +12,22 @@ buffer structure
 | 3             | register keys      | 2    | index and value floats           |
 | 4             | big buttons.       | 1    | float(bitmask)                   |
 | 5             | freq buttons       | 1    | float(bitmask)                   |
+
+new buffer structure
+| gui           | to                 | bela |                                  |
+| ------------- | ------------------ | ---- | -------------------------------- |
+| 0             | pot values         | 16    |  value floats           | SEND
+| 2             | 32 touch values    | 16    | float and index and panning     | SEND
+| 3             | register keys      | 5    |  value floats           | SEND 
+| 4             | big buttons.       | 1    | float(bitmask)                   | SEND
+| 5             | freq buttons       | 1    | float(bitmask)                   | SEND 
+| 2             | panning		     | 16    | float and index and panning       SEND 
+
+| 1             | preset index       | 1    | float                            | RECEIVE
+| 1             | preset index       | 1    | float                            | RECEIVE
+| 1             | preset index       | 1    | float                            | RECEIVE
+| 1             | preset index       | 1    | float                            | RECEIVE
+| 
 ```
 where the first argument (0) is the index of the sent buffer, second argument ('float') is the type of the
 data, and third argument (buffer) is the data array to be sent.
@@ -23,8 +38,7 @@ error handling is mostly on bela side
 
 let outerArc;
 let backgroundColor;
-let numPoints = 16;
-let pots, presetButtons, bigButtons, freqButtons, registerButtons;
+let pots, presetButtons, bigButtons, registerButtons;
 let meters;
 let segmentDisplay;
 let channelGains = [0.5, 0.2, 0.99,0.3, 0.2, 0.4, 0.2, 0.2];
@@ -34,25 +48,40 @@ let labels = {
   pots: ["Synth Gain", "High Frequency Boost", "Filter Q", "Filter Gain", "Lowpass Cutoff", "Mic Gain", "Unassigned", "Limiter Threshold", "Limiter Lookahead", "Limiter Release", "Reference Frequency", "Feedback Amount", "Glide", "Unassigned", "Unassigned", "Panning"],
   presetButtons: [],
   big: ["Save Preset", "Set Reference", "Output Toggle", "Drone Mode"],
-  freq: ["Mic Input", "Keyboard Input", "Last Selected"],
+//  freq: ["Mic Input", "Keyboard Input", "Last Selected"],
   register: ["Numerator", "Denominator", "Divisor", "Index", "Algorithm"]
 }
 
 // send buffers
-const MAX_CHANNELS = 8;
+const MAX_CHANNELS = 16;
 const BUFFER_POT = 0;
-const BUFFER_PRESET = 1;
-const BUFFER_TOUCH = 2;
-const BUFFER_REGISTER = 3;
-const BUFFER_BIG = 4;
-const BUFFER_FREQ = 5;
-const BUFFER_REC_SEND = 6;  
+const BUFFER_TOUCH = 1;
+const BUFFER_REGISTER = 2;
+const BUFFER_BIG = 3;
+const BUFFER_FREQ = 4;
+const BUFFER_REC_SEND = 5;
+const BUFFER_PANNING = 6;
 
 //receive buffers
 const BUFFER_RMS = 7;   
 const BUFFER_LEFT = 8;
 const BUFFER_RIGHT = 9;
-const BUFFER_PANNING = 10;
+const BUFFER_PRESET = 10;
+const BUFFER_AVAIL = 11;
+
+//registers 
+const NUMERATOR = 0;
+const DENOMINATOR = 1;
+const DIVISOR = 2;
+const INDEX = 3;
+const OPTIONS = 4;
+
+//not implemented yet
+const PAGE_UP = 5;
+const PAGE_DOWN = 6;
+
+let numPoints = MAX_CHANNELS;
+
  
 
 // ---- Recording state ----
@@ -61,7 +90,7 @@ let logData        = [];   // accumulated JSON entries
 
 // ---- GUI elements ----
 let recordButton;
-let downloadButton;
+let downloadRTData;
 let statusText;
 let channelMeters = [];    // visual RMS meters per channel
 
@@ -77,14 +106,14 @@ function setup() {
   
   backgroundColor = color(255, 255, 255);
   
-  outerArc = new arcTouch(0,0,300,300, numPoints);
+  outerArc = new arcTouch(0,0,300,300, MAX_CHANNELS);
   
   presetManager = new PresetManager(9);
   
 	  // Download bank
-	let downloadButton = createButton('Download Bank');
-	downloadButton.position(width-300, height);
-	downloadButton.mousePressed(() => presetManager.downloadBank());
+	let downloadBank = createButton('Download Bank');
+	downloadBank.position(width-300, height);
+	downloadBank.mousePressed(() => presetManager.downloadBank());
 	
 	let uploadButton = createButton('Upload Presets');
 	uploadButton.position(width-450, height);
@@ -135,12 +164,12 @@ function setup() {
   ]
   bigButtons = new buttonArray(bigButtonCoords, bigButtonCoords.length, 12, 16, type="BIG");
   
-  let freqButtonCoords = [
-    createVector(4, 2),
-    createVector(6, 2),
-    createVector(8, 2)
-  ]
-  freqButtons = new buttonArray(freqButtonCoords, freqButtonCoords.length, 12, 12, type="FREQ");
+  //let freqButtonCoords = [
+  //  createVector(4, 2),
+  //  createVector(6, 2),
+  //  createVector(8, 2)
+  //]
+  //freqButtons = new buttonArray(freqButtonCoords, freqButtonCoords.length, 12, 12, type="FREQ");
   
   let registerButtonCoords = [
     createVector(-1, -2),
@@ -159,13 +188,21 @@ function setup() {
     recordButton.position(width, height);
     recordButton.mousePressed(onRecordButtonPressed);
 
-    downloadButton = createButton('Download JSON');
-    downloadButton.position(width-150, height);
-    downloadButton.attribute('disabled', '');
-    downloadButton.mousePressed(onDownloadPressed);
+    downloadRTData = createButton('Download JSON');
+    downloadRTData.position(width-150, height);
+    downloadRTData.attribute('disabled', '');
+    downloadRTData.mousePressed(onDownloadPressed);
   
-  //send initial values
-  sendInit()
+	
+	setTimeout(() => {
+		 //after presets loaded, send
+		presetManager.loadPreset(0);
+	}, 1000);
+	
+	// Status text
+    statusText = createP('Stopped');
+    statusText.position(240, 14);
+ 
   
 }
 
@@ -184,7 +221,7 @@ function draw() {
   pots.drawShapes();
   presetButtons.drawShapes();
   bigButtons.drawShapes();
-  freqButtons.drawShapes();
+ // freqButtons.drawShapes();
   registerButtons.drawShapes();
   
   //pull first two buffers to meters
@@ -193,10 +230,10 @@ function draw() {
   
   fill(0,255,0);
   rectMode(CORNER)
-  channelGains.map((channelGain, index) => {
-    let channelSpacing = 300 / channelGains.length;
-    rect(width/4 + index*channelSpacing, height*0.4, channelSpacing-4, -60*channelGain*100 )
-  })
+  //channelGains.map((channelGain, index) => {
+  //  let channelSpacing = 300 / channelGains.length;
+  //  rect(width/4 + index*channelSpacing, height*0.4, channelSpacing-4, -60*channelGain*100 )
+  //})
   rectMode(CENTER)
   
   //segment display
@@ -227,10 +264,7 @@ function draw() {
         }
     }
     
-        // Status text
-    statusText = createP('Stopped');
-    statusText.position(240, 14);
- 
+
 }
 
 class Preset {
@@ -238,18 +272,18 @@ class Preset {
     constructor() {
         this.index = 0;
         this.sliderPositions = [
-            0.5, // synthGain
+            0, // synthGain
             0,   // hiFreqBoost
             0.5, // filterQ
             0.5, // filterGain
             0,   // lpCutoff
             0,   // micGain
             0,   // Unassigned
-            0,   // limiterThresh
-            0,   // limiterLookahead
-            0,   // limiterRelease
-            0,   // reference
-            0,   // fbAmount
+            0.2,   // limiterThresh
+            0.5,   // limiterLookahead
+            0.2,   // limiterRelease
+            0.4,   // reference
+            0.5,   // fbAmount
             0,   // glideAmount
             0,   // Unassigned
             0,   // Unassigned
@@ -257,15 +291,15 @@ class Preset {
         ];
 
         this.registerPositions = [
-            2, // Numerator
+            3, // Numerator
             1, // Denominator
             4, // Divisor
             0, // offset
             0  // Algorithm
         ];
 
-        this.oscillatorsOn = [false, false, false, false, false, false, false, false];
-        this.panning       = [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5];
+        this.oscillatorsOn =  new Array(MAX_CHANNELS).fill(false);
+        this.panning       = new Array(MAX_CHANNELS).fill(0.5);
     }
 
     toJSON(data = {sliders: this.sliderPositions, registers: this.registerPositions, oscs: this.oscillatorsOn, panning: this.panning }) {
@@ -294,9 +328,6 @@ class Preset {
         this.oscillatorsOn     = data.oscillatorsOn     ?? [...this.oscillatorsOn];
         this.panning           = data.panning           ?? [...this.panning];
         
-        //load into state 
-        loadPresetToState(this);
-        
         return this;
     }
 
@@ -304,6 +335,9 @@ class Preset {
     load(data) {
         // Populate fields from JSON
         this.fromJSON(data);
+        
+        //load into state 
+        this.loadPresetToState();
 
         // Send each parameter group to Bela via matching buffer IDs
         this._sendPots();
@@ -312,28 +346,52 @@ class Preset {
 
         console.log(`Preset ${this.index} loaded`);
     }
+    
+    loadPresetToState() {
+		outerArc.registerStates = [...this.registerPositions];
+		
+		this.sliderPositions.map((value, i) => {
+			pots.state.elements[i].elt.value = value;
+			pots.state.values[i] = value;
+		});
+		
+		this.oscillatorsOn.map((value, i) => {
+			outerArc.state.elements[i].elt.checked = value;
+			outerArc.state.colors[i] = color(value ? 0:255, 0, 0)
+	    	outerArc.state.touched[i] = value;
+	    	outerArc.state.panning[i] = this.panning[i];
+		});
+	
+		
+		
+		console.log(`uploaded preset ${this.index} to state`)
+	}
 
     // ---- Private send helpers ----
 
     _sendPots() {
         // Send all slider positions - Bela will handle soft takeover
         // Buffer 6: [potIndex, potValue] pairs sent sequentially
-        this.sliderPositions.map((val, i) => {
-            Bela.data.sendBuffer(BUFFER_POT, 'float', [parseFloat(i), parseFloat(val)]);
+        let sendArray = [];
+        this.sliderPositions.map(val => {
+        	sendArray.push(parseFloat(val));
         });
+        Bela.data.sendBuffer(BUFFER_POT, 'float', sendArray);
     }
 
     _sendRegisters() {
+    	let sendArray = [];
 		this.registerPositions.map((val, i) => {
-    		Bela.data.sendBuffer(BUFFER_REGISTER, 'float', [parseFloat(i), parseFloat(val)]);			
+        	sendArray.push(parseFloat(val));		
 		});
+		Bela.data.sendBuffer(BUFFER_REGISTER, 'float', sendArray);	
     }
 
     _sendOscillators() {
         let oscFloats = this.oscillatorsOn.map(v => v ? 1.0 : 0.0);
-        oscFloats.map((val, i) => {
-			Bela.data.sendBuffer(BUFFER_TOUCH, 'float', [parseFloat(i), oscFloats[i], parseFloat(this.panning[i])]);
-        })
+    	setTimeout(() => {
+			Bela.data.sendBuffer(BUFFER_TOUCH, 'float', oscFloats);
+		}, 2000);
     }
 }
 
@@ -418,9 +476,9 @@ class arcTouch {
     this.state = {
       colors: [],
       // this contains both index and value
-      touched: new Array(32).fill(false),
+      touched: new Array(MAX_CHANNELS).fill(false),
       elements: [],
-      panning: new Array(32).fill(0.5),
+      panning: new Array(MAX_CHANNELS).fill(0.5),
       lastTouched: 0
     }
     this.maxTouchPoints = 4;
@@ -432,9 +490,8 @@ class arcTouch {
   }
   
   init() {
-    for(let point = 0; point<this.numPoints*2; point++) {
+    for(let point = 0; point<this.numPoints; point++) {
       this.state.colors.push(color(255, 0, 0));
-      this.state.touched.push(false);
       
       this.state.elements.push(createInput(`${point}`, "checkbox"));
       this.state.elements[point].position(10 + 22*point, height-20);
@@ -464,10 +521,10 @@ class arcTouch {
     arc(this.x, this.y, this.w, this.h, angle, nextAngle, PIE);
     fill(backgroundColor);
     arc(this.x, this.y, this.w*0.9, this.h*0.9, angle, nextAngle, PIE);
-    fill(this.state.colors[this.numPoints+point]);
-    arc(this.x, this.y, this.w*0.8, this.h*0.8, angle, nextAngle, PIE);
-    fill(backgroundColor);
-    arc(this.x, this.y, this.w*0.7, this.h*0.7, angle, nextAngle, PIE);
+    // fill(this.state.colors[this.numPoints+point]);
+    // arc(this.x, this.y, this.w*0.8, this.h*0.8, angle, nextAngle, PIE);
+    // fill(backgroundColor);
+    // arc(this.x, this.y, this.w*0.7, this.h*0.7, angle, nextAngle, PIE);
       
     }
   }
@@ -511,12 +568,13 @@ class buttonArray {
           this.state.elements[button].position(width*0.8, 120+button*20);
           this.state.elements[button].size(40);
           this.state.elements[button].elt.addEventListener("change", updateRegister);
-      } else if (this.type == "FREQ") {
-          this.state.elements.push(createInput(`${button}`, "checkbox"));
-          this.state.elements[button].position(width*0.8, 240+button*20);
-          this.state.elements[button].size(40);
-          this.state.elements[button].elt.addEventListener("change", updateFreq);
-      }
+      } 
+      //else if (this.type == "FREQ") {
+      //    this.state.elements.push(createInput(`${button}`, "checkbox"));
+      //    this.state.elements[button].position(width*0.8, 240+button*20);
+      //    this.state.elements[button].size(40);
+      //    this.state.elements[button].elt.addEventListener("change", updateFreq);
+      //}
     }
     
     //outsite for loop
@@ -546,9 +604,10 @@ class buttonArray {
        // this.state.colors[button] = this.state.value;
       } else if (this.type =="REGISTER") {
         text(labels.register[button], width*0.6, -height/2 + 130+  button *20 )
-      } else if (this.type =="FREQ") {
-        text(labels.freq[button], width*0.6, -height/2 + 250+  button *20 )
-      }
+      } 
+      //else if (this.type =="FREQ") {
+      //  text(labels.freq[button], width*0.6, -height/2 + 250+  button *20 )
+      //}
     }
     
     if (this.type == "PRESET") {
@@ -606,7 +665,7 @@ function updateArc(e) {
 		
 		
 		//resolve arc back to its original state (touched)
-		for(let t = 0; t<outerArc.numPoints*2; t++){
+		for(let t = 0; t<outerArc.numPoints; t++){
 			if(outerArc.state.touched[t]) {
 				outerArc.state.colors[t] = color(0,0,0);
 				outerArc.state.elements[t].elt.checked = true;
@@ -616,8 +675,9 @@ function updateArc(e) {
 			}
 		}
 		
-		//send register to bela
-		Bela.data.sendBuffer(BUFFER_REGISTER, 'float', [outerArc.registerIndex, e.target.value]);
+		//send registers to bela
+		let sendArray = outerArc.registerStates.map(v => parseFloat(v));
+		Bela.data.sendBuffer(BUFFER_REGISTER, 'float', sendArray);
 		
 		outerArc.registerOn = false;
 		
@@ -630,18 +690,16 @@ function updateArc(e) {
 	
     
     
-      //go through all points and colors and indicators based on state changes
+    //go through all points and colors and indicators based on state changes
     let index = e.target.value;
    
     outerArc.state.colors[index] = color(e.target.checked ? 0:255, 0, 0)
     outerArc.state.touched[index] = e.target.checked;
     outerArc.state.lastTouched = index;
     
-    //convert to float array first
-    let touchBufferArray = [parseFloat(index), + outerArc.state.touched[index], outerArc.state.panning[index]];
-    
     //send to bela 
-    Bela.data.sendBuffer(BUFFER_TOUCH, 'float', touchBufferArray);
+    let oscFloats = outerArc.state.touched.map(v => v ? 1.0 : 0.0);
+    Bela.data.sendBuffer(BUFFER_TOUCH, 'float', oscFloats);
 }
 
 function updateBig(e) {
@@ -681,8 +739,8 @@ function updateBig(e) {
   
   bigButtons.state.mask = updateBitmask(bigButtons.state.mask, index, e.target.checked);
 
-  
-  Bela.data.sendBuffer(BUFFER_BIG, 'float', bigButtons.state.mask)
+  console.log(bigButtons.state.mask);
+  Bela.data.sendBuffer(BUFFER_BIG, 'float', [bigButtons.state.mask])
 }
 
 function updateRegister(e) {
@@ -711,7 +769,7 @@ function updateRegister(e) {
 	outerArc.registerIndex = index;
   
   //update arc with current register data
-  for(let f = 0; f<outerArc.numPoints*2; f++) {
+  for(let f = 0; f<outerArc.numPoints; f++) {
   	if (f == outerArc.registerStates[index]) {
   		outerArc.state.colors[f] = color(0,0,0);
   		outerArc.state.elements[f].elt.checked = true;
@@ -723,18 +781,17 @@ function updateRegister(e) {
   
 }
 
-function updateFreq(e) {
-  let index = e.target.value;
-  freqButtons.state.colors[index] = color(e.target.checked ? 255:0, 0, 0);
+// function updateFreq(e) {
+//   let index = e.target.value;
+//   freqButtons.state.colors[index] = color(e.target.checked ? 255:0, 0, 0);
   
-  freqButtons.state.mask = updateBitmask(freqButtons.state.mask, index, e.target.checked);
+//   freqButtons.state.mask = updateBitmask(freqButtons.state.mask, index, e.target.checked);
   
-  Bela.data.sendBuffer(BUFFER_FREQ, 'float', freqButtons.state.mask)
-}
+//   Bela.data.sendBuffer(BUFFER_FREQ, 'float', [freqButtons.state.mask])
+// }
 
 function updatePreset(e) {
-	
-
+	presetManager.loadPreset(index);
 }
 
 function updatePot(e) {
@@ -749,11 +806,17 @@ function updatePot(e) {
 	if(potindex == 15) {
 		// last touched 
 		outerArc.state.panning[outerArc.state.lastTouched] = potvalue;
+		
+		let panningArray = outerArc.state.panning.map(v => parseFloat(v));
+		Bela.data.sendBuffer(BUFFER_PANNING, 'float', potsarray);
+		
 	} else {
 		pots.state.values[potindex] = potvalue;
 	}
 
-	Bela.data.sendBuffer(BUFFER_POT, 'float', [potindex, potvalue]);
+	console.log("sending slider data", potindex, potvalue)
+	let potsarray = pots.state.values.map(v => parseFloat(v));
+	Bela.data.sendBuffer(BUFFER_POT, 'float', potsarray);
 }
 
 // Set or clear a bit by index and boolean value
@@ -762,21 +825,6 @@ function updateBitmask(mask, index, value) {
         return (mask | (1 << index)) >>> 0;   
     else
         return (mask & ~(1 << index)) >>> 0;  
-}
-
-function sendInit() {
-	
-	//no touch initially
-	
-	//register
-	//num = 2
-	Bela.data.sendBuffer(3, 'float', [0, outerArc.registerStates[0]]);
-	//denom = 1
-	Bela.data.sendBuffer(3, 'float', [1, outerArc.registerStates[1]]);
-	//div = 4
-	Bela.data.sendBuffer(3, 'float', [2, outerArc.registerStates[2]]);
-	
-	
 }
 
 
@@ -800,7 +848,7 @@ function setRecordingState(state) {
         recordButton.html('Stop');
         statusText.html('Recording...');
         statusText.style('color', 'red');
-        downloadButton.attribute('disabled', '');
+        downloadRTData.attribute('disabled', '');
     } else {
         recordButton.html('Record');
         statusText.html('Stopped');
@@ -808,7 +856,7 @@ function setRecordingState(state) {
 
         // Only enable download if we have data
         if(logData.length > 0)
-            downloadButton.removeAttribute('disabled');
+            downloadRTData.removeAttribute('disabled');
     }
 }
 
@@ -827,24 +875,6 @@ function onDownloadPressed() {
     URL.revokeObjectURL(url);
 }
 
-function loadPresetToState(preset) {
-	outerArc.registerStates = [...preset.registerPositions];
-	
-	preset.sliderPositions.map((value, i) => {
-		pots.state.elements[i].elt.value = value;
-		pots.state.values[i] = value;
-	});
-	
-	preset.oscillatorsOn.map((value, i) => {
-		outerArc.state.elements[i].elt.checked = value;
-		outerArc.state.colors[index] = color(value ? 0:255, 0, 0)
-    	outerArc.state.touched[index] = value;
-    	outerArc.state.panning = preset.panning[i];
-	});
 
-	
-	
-	console.log(`uploaded preset ${preset.index} to state`)
-}
 
 

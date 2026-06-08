@@ -18,12 +18,15 @@
 
 
 #define NUM_CAP_CHANNELS 30
-#define NUM_OSCS 8
+#define NUM_OSCS 16
 #define NUM_KEYS 12
 #define analogBaseFreq 0 
 #define analogAmplitude 1
 #define RMS_INTERVAL_MS 50
 #define RECORD_BUTTON_CHANNEL 0  // which analog input the button is on
+
+#define RELEASE_MS 50
+#define CROSSFADE_MS 10 
 
 #define SENDBUF 0
 
@@ -32,6 +35,7 @@
 bool gMicOn = true;
 bool gFeedbackOn = true;
 int numOscillatorsOn = 0;
+float gSmoothAlpha = 0.001f;
 
 // dark purple - 3.3v
 // grey - gnd 
@@ -78,6 +82,42 @@ typedef enum {
 	Four,
 	Five,
 } guiParams;
+
+typedef enum {
+	POT,
+	TOUCH,
+	REGISTER,
+	BIG,
+	FREQ,
+	REC_SEND,
+	PANNING,
+	RMS,   
+	LEFT,
+	RIGHT,
+	PRESET,
+	AVAIL,
+} buffers;
+
+enum OscState {
+    IDLE,
+    ACTIVE,
+    RELEASING
+};
+
+struct Oscillator {
+    OscState state           = IDLE;
+
+    float gain               = 0.0f;
+    float targetGain         = 0.0f;
+
+    float currentFrequency   = 0.0f;
+    float targetFrequency    = 0.0f;
+
+    float phase              = 0.0f;
+    float panning            = 0.5f;
+};
+
+Oscillator gOscillators[NUM_OSCS];
 
 
 struct Command {
@@ -151,55 +191,62 @@ struct BufferState {
 	
 };
 
-// i think that this struct would serve as preset data 
+
+// ---- Ramp rates (computed in setup()) ----
+float gReleaseRampRate   = 0.0f;  // per sample, during RELEASING
+float gCrossfadeRampRate = 0.0f;  // per sample, during preset crossfade
+
+// ---- Master crossfade ----
+float gMasterGain        = 1.0f;
+float gTargetMasterGain  = 1.0f;
+std::atomic<bool> gPresetLoading{false};
+
 struct DeviceState {
-	
-	//buttons
-	bool micButton;
-	bool keyboardButton;
-	bool lastSelectedButton;
-	bool savePresetButton;
-	bool setReferenceButton;
-	bool toggleOutputButton = false;
-	bool droneModeButton;
-	std::atomic<bool> recButton{false};
-	
-	//potentiometers
-	float synthGain = 0.5;
-	float hiFreqBoost = 0;
-	float filterQ = 100.0;
-	float filterGain = 10;
-	float lpCutoff = 5000;
-	float micGain = 3.0;
-	float limiterThresh = 0.95;
-	//ms
-	float limiterLookahead  = 0.4;
-	float limiterRelease  = 10.;
-	float baseFrequency = 220;
-	float fbAmount = 20;
-	float glideAmount = 10;
-	
-	//touch data 
-	int lastTouched = 0;
-	
-	//preset data 
-	int activePreset = 0;
-	
-	//freq display
-	float freqDisplay;
-	
-	//config data
-	float numerator = 2;
-	float denominator = 1;
-	float divisor = 4;
-	int offset = 0;
-	algorithms selectedAlgorithm = 	RATIO_DIVISION;
-	//  means off, 
-	bool oscillatorsOn[NUM_OSCS] =	{false, false, false, false, false, false, false, false};
-	int noteIndex[NUM_OSCS] =		{0, 0, 0, 0, 0, 0, 0, 0};
-	float targetRatio[NUM_OSCS] =	{0, 1, 0, 1, 0, 0, 0, 0};
-	float panning[NUM_OSCS] = {0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5};
-	
+
+    bool micButton           = false;
+    bool keyboardButton      = false;
+    bool lastSelectedButton  = false;
+    bool savePresetButton    = false;
+    bool setReferenceButton  = false;
+    bool toggleOutputButton  = false;
+    bool droneModeButton     = false;
+    std::atomic<bool> recButton{false};
+
+
+    float targetSynthGain    = 0.5f;
+    float currentSynthGain   = 0.5f;
+
+    float targetMicGain      = 3.0f;
+    float currentMicGain     = 3.0f;
+
+    float targetFbAmount     = 20.0f;
+    float currentFbAmount    = 20.0f;
+
+    float targetLpCutoff     = 5000.0f;
+    float currentLpCutoff    = 5000.0f;
+
+    float targetBaseFrequency = 220.0f;
+    float currentBaseFrequency = 220.0f;
+
+    float targetHiFreqBoost  = 0.0f;
+    float currentHiFreqBoost = 0.0f;
+
+    float filterQ            = 100.0f;
+    float filterGain         = 10.0f;
+    float limiterThresh      = 0.95f;
+    float limiterLookahead   = 0.4f;
+    float limiterRelease     = 10.0f;
+    float glideAmount        = 10.0f;
+
+    float numerator          = 2.0f;
+    float denominator        = 1.0f;
+    float divisor            = 4.0f;
+    int   offset             = 0;
+    algorithms selectedAlgorithm = ARITHMETIC_DIVISION;
+
+    int   lastTouched        = 0;
+    int   activePreset       = 0;
+    float freqDisplay        = 0.0f;
 };
 
 BufferState gBufferState;
@@ -217,8 +264,8 @@ float gDecay = 0.05; // Envelope decay (seconds)
 float gRelease = 0.5; // Envelope release (seconds)
 float gSustain = 0.9; // Envelope sustain level
 
-float gFrequencies[NUM_OSCS]; // Oscillator frequency (Hz)
-float gPhases[NUM_OSCS]; // Oscillator phase
+//float gFrequencies[NUM_OSCS]; // Oscillator frequency (Hz)
+//float gPhases[NUM_OSCS]; // Oscillator phase
 
 float gInverseSampleRate;
 
@@ -237,7 +284,10 @@ bool holdMode = false;
 
 
 bool gNeedsUpdate = false;
-
+// In header
+bool gNeedsFilterUpdate  = false;
+bool gNeedsLimiterUpdate = false;
+bool gNeedsFreqUpdate = false;
 
 
 int gAudioFramesPerAnalogFrame = 0;
