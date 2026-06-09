@@ -3,15 +3,6 @@ For sending a buffer from p5.js to Bela we use the function:
 ```
 Bela.data.sendBuffer(0, 'float', buffer);
 
-old buffer structure
-| gui           | to                 | bela |                                  |
-| ------------- | ------------------ | ---- | -------------------------------- |
-| 0             | pot values         | 2    | index and value floats           |
-| 1             | preset index       | 1    | float                            |
-| 2             | 32 touch values    | 3    | float and index and panning                            |
-| 3             | register keys      | 2    | index and value floats           |
-| 4             | big buttons.       | 1    | float(bitmask)                   |
-| 5             | freq buttons       | 1    | float(bitmask)                   |
 
 new buffer structure
 | gui           | to                 | bela |                                  |
@@ -81,7 +72,6 @@ const PAGE_UP = 5;
 const PAGE_DOWN = 6;
 
 let numPoints = MAX_CHANNELS;
-
  
 
 // ---- Recording state ----
@@ -263,6 +253,17 @@ function draw() {
             });
         }
     }
+    
+    let availBuf = Bela.data.buffers[BUFFER_AVAIL];
+    if(availBuf && availBuf.length == 2) {
+    	
+    	if(availBuf[0] != outerArc.state.touchMin || availBuf[1] != outerArc.state.touchMax){
+    		outerArc.state.touchMin = availBuf[0];
+    		outerArc.state.touchMax = availBuf[1];
+    		updateAvailability(outerArc.state.touchMin - outerArc.registerStates[INDEX], outerArc.state.touchMax- outerArc.registerStates[INDEX]);
+    	}
+    }
+    
     
 
 }
@@ -487,6 +488,8 @@ class arcTouch {
     this.registerStates = [1, 0, 3, 0, 1];
     this.registerOn = false;
     this.registerIndex = 0;
+    this.touchMin = 0;
+    this.touchMax = 63;
   }
   
   init() {
@@ -680,6 +683,7 @@ function updateArc(e) {
 		Bela.data.sendBuffer(BUFFER_REGISTER, 'float', sendArray);
 		
 		outerArc.registerOn = false;
+		updateAvailability(outerArc.state.touchMin - outerArc.registerStates[INDEX], outerArc.state.touchMax - outerArc.registerStates[INDEX]);
 		
 		return;
 		
@@ -700,6 +704,20 @@ function updateArc(e) {
     //send to bela 
     let oscFloats = outerArc.state.touched.map(v => v ? 1.0 : 0.0);
     Bela.data.sendBuffer(BUFFER_TOUCH, 'float', oscFloats);
+}
+
+function updateAvailability(min, max) {
+	//considering index and min and max 
+	
+	outerArc.state.elements.map((element, i) => {
+	//	let thisIndex = i + outerArc.registerStates[INDEX];
+	//	console.log(thisIndex, outerArc.state.touchMax);
+		if(i > max || i < min) {
+			element.elt.setAttribute('disabled', '');	
+		} else {
+			element.elt.removeAttribute('disabled');
+		}
+	})
 }
 
 function updateBig(e) {
@@ -744,6 +762,11 @@ function updateBig(e) {
 }
 
 function updateRegister(e) {
+	
+	
+	//updateAvailability
+	updateAvailability(0, 16);
+	
 
 //last pressed 
   registerButtons.state.values.map((value, i) => {
@@ -779,6 +802,7 @@ function updateRegister(e) {
   	}
   }
   
+
 }
 
 // function updateFreq(e) {
@@ -807,8 +831,11 @@ function updatePot(e) {
 		// last touched 
 		outerArc.state.panning[outerArc.state.lastTouched] = potvalue;
 		
+
+		
 		let panningArray = outerArc.state.panning.map(v => parseFloat(v));
-		Bela.data.sendBuffer(BUFFER_PANNING, 'float', potsarray);
+		Bela.data.sendBuffer(BUFFER_PANNING, 'float', panningArray);
+		return;
 		
 	} else {
 		pots.state.values[potindex] = potvalue;

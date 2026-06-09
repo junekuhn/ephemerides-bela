@@ -19,16 +19,11 @@
 
 #define NUM_CAP_CHANNELS 30
 #define NUM_OSCS 16
-#define NUM_KEYS 12
-#define analogBaseFreq 0 
-#define analogAmplitude 1
 #define RMS_INTERVAL_MS 50
 #define RECORD_BUTTON_CHANNEL 0  // which analog input the button is on
 
 #define RELEASE_MS 50
 #define CROSSFADE_MS 10 
-
-#define SENDBUF 0
 
 
 //UTILITY GLOBALS
@@ -36,11 +31,6 @@ bool gMicOn = true;
 bool gFeedbackOn = true;
 int numOscillatorsOn = 0;
 float gSmoothAlpha = 0.001f;
-
-// dark purple - 3.3v
-// grey - gnd 
-// white - sda 
-// black. - sdl 
 
 //Instantiate a scope
 Scope scope;
@@ -61,27 +51,27 @@ float gOutput[NUM_OSCS];
 // Sleep time for auxiliary task
 unsigned int gTaskSleepTime = 12000; // microseconds
 
-int bitResolution = 12;
+//int bitResolution = 12;
 
 int gButtonValue = 0;
 
 float filterChannels[NUM_OSCS];
 
-typedef enum {
-	kPrescaler,
-	kBaseline,
-	kNoiseThreshold,
-	kNumBits,
-	kMode,
-} ids_t;
+// typedef enum {
+// 	kPrescaler,
+// 	kBaseline,
+// 	kNoiseThreshold,
+// 	kNumBits,
+// 	kMode,
+// } ids_t;
 
-typedef enum {
-	One,
-	Two,
-	Three,
-	Four,
-	Five,
-} guiParams;
+// typedef enum {
+// 	One,
+// 	Two,
+// 	Three,
+// 	Four,
+// 	Five,
+// } guiParams;
 
 typedef enum {
 	POT,
@@ -106,29 +96,27 @@ enum OscState {
 
 struct Oscillator {
     OscState state           = IDLE;
-
     float gain               = 0.0f;
     float targetGain         = 0.0f;
-
     float currentFrequency   = 0.0f;
     float targetFrequency    = 0.0f;
-
     float phase              = 0.0f;
     float panning            = 0.5f;
+    float available			= true;
 };
 
 Oscillator gOscillators[NUM_OSCS];
 
 
-struct Command {
-	ids_t id;
-	float value;
-};
+// struct Command {
+// 	ids_t id;
+// 	float value;
+// };
 
-struct SendParam {
-	guiParams id;
-	float value;
-};
+// struct SendParam {
+// 	guiParams id;
+// 	float value;
+// };
 
 typedef enum {
 	ARITHMETIC_DIVISION,
@@ -137,27 +125,27 @@ typedef enum {
 } algorithms;
 
 
-std::vector<std::pair<std::wstring, guiParams>> gParams =
-{
-	{L"one", One},
-	{L"two", Two},
-	{L"three", Three},
-	{L"four", Four},
-	{L"five", Five},
-};
+// std::vector<std::pair<std::wstring, guiParams>> gParams =
+// {
+// 	{L"one", One},
+// 	{L"two", Two},
+// 	{L"three", Three},
+// 	{L"four", Four},
+// 	{L"five", Five},
+// };
 
-const std::map<std::string, int> configs {
-	{"ATTACK", 5},
-	{"DECAY", 2},
-	{"SUSTAIN", 3},
-	{"RELEASE", 4},
-	{"TOP", 29},
-	{"DIVISOR", 28},
-	{"BOTTOM", 0},
-	{"ALGORITHM", 22},
-	{"GLIDE", 23},
-	{"HOLD", 24}
-};
+// const std::map<std::string, int> configs {
+// 	{"ATTACK", 5},
+// 	{"DECAY", 2},
+// 	{"SUSTAIN", 3},
+// 	{"RELEASE", 4},
+// 	{"TOP", 29},
+// 	{"DIVISOR", 28},
+// 	{"BOTTOM", 0},
+// 	{"ALGORITHM", 22},
+// 	{"GLIDE", 23},
+// 	{"HOLD", 24}
+// };
 
 struct BufferState {
 
@@ -200,6 +188,22 @@ float gCrossfadeRampRate = 0.0f;  // per sample, during preset crossfade
 float gMasterGain        = 1.0f;
 float gTargetMasterGain  = 1.0f;
 std::atomic<bool> gPresetLoading{false};
+
+// ranges for registers
+int numerator_min = 1;
+int numerator_max = 16;
+int denominator_min = 1;
+int denominator_max = 16;
+int index_min = 0;
+int index_max = 63;
+int touch_min = 0;
+int touch_max = 63;
+int num_options = 3; // size of algorithms enum 
+int div_min = 1; // no divisions 
+int div_max = 32; // max 32 EDO 
+float freq_min = 10.f;
+float freq_max = 10000.f;
+
 
 struct DeviceState {
 
@@ -253,9 +257,6 @@ BufferState gBufferState;
 DeviceState gDeviceState;
 DeviceState gPresets[10];
 
-// int keys[NUM_KEYS] = {8,9,10,11,12,13,14,15,16,17,18,19,20,21};
-//with two broken keys
-int keys[NUM_KEYS] = {8,9,11,12,13,14,15,16,17,18,19,21};
 
 ADSR envelopes[NUM_OSCS]; // ADSR envelope
 
@@ -277,7 +278,6 @@ float ratios[NUM_OSCS] = {1,1,1,1,1, 1, 1, 1};
 
 
 float thresholdTouch = 0.1;
-//std::string configMode = "OFF";
 int voiceCount = 1;
 bool holdMode = false;
 
@@ -288,7 +288,6 @@ bool gNeedsUpdate = false;
 bool gNeedsFilterUpdate  = false;
 bool gNeedsLimiterUpdate = false;
 bool gNeedsFreqUpdate = false;
-
 
 int gAudioFramesPerAnalogFrame = 0;
 

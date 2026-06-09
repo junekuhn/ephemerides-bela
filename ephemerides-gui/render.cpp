@@ -2,20 +2,20 @@
 
 
 //converting from midi key to index
-int displaceIndex(int key) {
-	int offset = NUM_KEYS - 1;
-	int c = 0;
+// int displaceIndex(int key) {
+// 	int offset = NUM_KEYS - 1;
+// 	int c = 0;
 	
-	if((int) gDeviceState.divisor % 2 == 0) {
-		offset = NUM_KEYS;
-		c = (offset - gDeviceState.divisor) / 2 + 1;
-	} else {
-		c = (offset - gDeviceState.divisor) / 2;
-	}
+// 	if((int) gDeviceState.divisor % 2 == 0) {
+// 		offset = NUM_KEYS;
+// 		c = (offset - gDeviceState.divisor) / 2 + 1;
+// 	} else {
+// 		c = (offset - gDeviceState.divisor) / 2;
+// 	}
 	
 	
-	return key - c;
-}
+// 	return key - c;
+// }
 
 // void storePreset(DeviceState currentState, int index) {
 // 	if(index < 10 && index >= 0) {
@@ -27,12 +27,13 @@ int displaceIndex(int key) {
 void sendRmsBuffer(void*) {
     if(!gRmsReady.load()) return;
 
-    // Pack [timestamp, ch0...ch31] into one buffer
-    float outBuffer[9];
+    float outBuffer[NUM_OSCS+1];
     outBuffer[0] = gTimestampMs;
-    memcpy(&outBuffer[1], gRmsResults, NUM_OSCS * sizeof(float));
+    for(int i = 1; i<NUM_OSCS+1; i++ ) {
+    	outBuffer[i] = gRmsResults[i];
+    }
 
-    gui.sendBuffer(7, outBuffer, 9);
+    gui.sendBuffer(RMS, outBuffer, NUM_OSCS+1);
 
     gRmsReady.store(false);
 }
@@ -73,6 +74,60 @@ float calculateRatio(algorithms algo, int index) {
 	
 	return ratio;
 	
+}
+
+void calculateAvailability(Oscillator oscs[]) {
+	
+	for(int i = 0; i< NUM_OSCS; i++) {
+		//if you modulate to something out of range, it turns off
+		if(oscs[i].targetFrequency > freq_max || 
+		oscs[i].targetFrequency < freq_min ) {
+			oscs[i].available = false;
+			oscs[i].state = RELEASING;
+		}
+
+	}
+	
+	//calculate frequences outside of Oscillators and update index range 
+	// find lowest note and adjust range 
+	int oscIndex = 0;
+	bool newIndexFlag = false;
+	while(oscIndex > -32) {
+		
+		float newFreq = calculateRatio(gDeviceState.selectedAlgorithm, oscIndex) * gDeviceState.targetBaseFrequency;
+		//offset? 
+		if (newFreq < freq_min) {
+			touch_min = oscIndex;
+			newIndexFlag = true;
+			break;
+		}
+		
+		oscIndex--;
+	}
+	
+	if(!newIndexFlag) touch_min = -32;
+	
+	oscIndex = 0;
+	newIndexFlag = false;
+	
+	while(oscIndex < 63) {
+		
+		float newFreq = calculateRatio(gDeviceState.selectedAlgorithm, oscIndex) * gDeviceState.targetBaseFrequency;
+		if(newFreq > freq_max) {
+			touch_max = oscIndex;
+			newIndexFlag = true;
+			break;
+		}
+		
+		oscIndex++;
+		
+	}
+	
+	if(!newIndexFlag) touch_max = 63;
+	
+	
+//	rt_printf("printing touch minmax\n");
+//	rt_printf("%i %i", touch_min, touch_max);
 }
 
 
@@ -270,18 +325,19 @@ bool setup(BelaContext *context, void *userData)
 
     // Buffer declarations must match buffers enum order:
     // POT, TOUCH, REGISTER, BIG, FREQ, REC_SEND, PANNING
-    gui.setBuffer('f', 16);  // POT
-    gui.setBuffer('f', 16);  // TOUCH
+    gui.setBuffer('f', NUM_OSCS);  // POT
+    gui.setBuffer('f', NUM_OSCS);  // TOUCH
     gui.setBuffer('f', 5);   // REGISTER
     gui.setBuffer('f', 1);   // BIG
     gui.setBuffer('f', 1);   // FREQ
     gui.setBuffer('f', 1);   // REC_SEND
-    gui.setBuffer('f', 16);  // PANNING
+    gui.setBuffer('f', NUM_OSCS);  // PANNING
     // Send buffers
-    gui.setBuffer('f', 9);   // RMS
+    gui.setBuffer('f', NUM_OSCS + 1);   // RMS
     gui.setBuffer('f', 1);   // LEFT
     gui.setBuffer('f', 1);   // RIGHT
     gui.setBuffer('f', 1);   // PRESET
+    gui.setBuffer('f', 2);   // availability/ranges 
 
     // ---- Oscillator bank init ----
     for(int i = 0; i < NUM_OSCS; i++) {
@@ -603,6 +659,18 @@ void render(BelaContext *context, void *userData)
 	        );
 	        gOscillators[i].targetFrequency = ratio * gDeviceState.targetBaseFrequency;
 	    }
+	    
+	    //update availability 
+	    calculateAvailability(gOscillators);
+	    
+	    //send touch availability
+	    float availArray[2];
+	    availArray[0] = (float) touch_min;
+	    availArray[1] = (float) touch_max;
+	    gui.sendBuffer(AVAIL, availArray);
+	    
+	    
+	    
 	    gNeedsFreqUpdate = false;
 	}
 	
@@ -654,7 +722,7 @@ void render(BelaContext *context, void *userData)
             // Analog reads available here if needed
         }
 
-        // ---- Mic input ----
+
         if(gMicOn) {
             input = audioRead(context, n, 0);
         }
@@ -700,12 +768,9 @@ void render(BelaContext *context, void *userData)
             }
         }
 
-        // ----------------------------------------------------------------
-        // OSCILLATOR LOOP
-        // ----------------------------------------------------------------
+
         for(int i = 0; i < NUM_OSCS; i++) {
 
-            // ---- Filter input ----
             filterChannels[i] = filterBank[i].process(input);
             filterChannels[i] = inputLimiter.processSample(filterChannels[i]);
 
@@ -772,7 +837,7 @@ void render(BelaContext *context, void *userData)
             }
         }
         
-        		   // After oscillator loop, before post processing
+        // After oscillator loop, before post processing
 		if(outArray[0] > 0.9f || outArray[0] < -0.9f)
 		    rt_printf("clipping: %.4f\n", outArray[0]);
 
